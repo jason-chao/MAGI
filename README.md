@@ -12,9 +12,11 @@ Technically, MAGI is a Python-based CLI tool that leverages `litellm` to invoke 
 - **Multi-Persona Council**: Consult OpenAI, Anthropic, Gemini, and other models simultaneously.
 - **Decision Modes**:
   - **Vote**: Conduct democratic votes on propositions.
+  - **Majority**: Identify the prevailing opinion or most common answer.
   - **Consensus**: Find common ground between differing viewpoints.
-  - **Minority Report**: specifically hunt for blind spots and dissenting opinions.
+  - **Minority Report**: Specifically hunt for blind spots and dissenting opinions.
   - **Probability**: Estimate the likelihood of future events.
+- **Deliberation**: Enables a deliberative round where agents review and critique each other's initial responses before finalizing their own.
 - **Rapporteur System**: The most confident AI is chosen to present the group's findings.
 - **Anonymity**: Agents deliberate using pseudonyms to prevent brand bias.
 
@@ -48,11 +50,21 @@ Technically, MAGI is a Python-based CLI tool that leverages `litellm` to invoke 
 
 ## Usage
 
+### CLI
+
 Run the CLI tool:
 
 ```bash
+# Basic usage
 python magi-cli.py "Should we adopt Rust for our next project?" --method VoteYesNo --llms gpt-5.2,gemini-3-pro-preview,claude-3-haiku-20240307
+
+# Enable Deliberative Round
+python magi-cli.py "Should we adopt Rust?" --deliberative
 ```
+
+### Package
+
+You can also use MAGI as a package in your Python scripts. See [PACKAGE_USAGE.md](PACKAGE_USAGE.md) for more details.
 
 ### Examples
 
@@ -100,6 +112,7 @@ python magi-cli.py "We are living in a computer simulation." --method Probabilit
 - `--method`: `VoteYesNo` (default), `VoteOptions`, `Majority`, `Consensus`, `Minority`, or `Probability`.
 - `--options`: Comma-separated list of options for `VoteOptions` method.
 - `--vote-threshold`: Threshold for voting (default 0.5).
+- `--deliberative`: Enable a second round where agents review peer responses (default: False).
 - `--no-abstain`: Disallow abstaining in votes or probability (-1.0).
 - `--rapporteur-prompt`: Custom instructions to append to the rapporteur prompt.
 - `--config`: Path to config file.

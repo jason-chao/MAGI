@@ -22,6 +22,7 @@ def main():
     parser.add_argument("--config", help="Path to config file", default="config.yaml")
     parser.add_argument("--prompts", help="Path to prompts file", default="prompts.yaml")
     parser.add_argument("--rapporteur-prompt", help="Custom instructions to append to the rapporteur prompt", default=None)
+    parser.add_argument("--deliberative", help="Enable deliberative round", action="store_true")
     
     args = parser.parse_args()
 
@@ -68,7 +69,8 @@ def main():
             system_prompt=args.system_prompt,
             selected_llms=selected_llms,
             method=args.method,
-            method_options=method_options
+            method_options=method_options,
+            deliberative=args.deliberative
         ))
         print(result)
     except Exception as e:

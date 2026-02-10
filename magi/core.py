@@ -158,46 +158,23 @@ class Magi:
             logger.error(f"Error invoking raw {model_name}: {e}")
             return f"Error: {e}"
 
-    async def run(self, user_prompt: str, system_prompt: Optional[str] = None, selected_llms: Optional[List[str]] = None, method: str = 'VoteYesNo', method_options: Dict[str, Any] = None) -> str:
-        """
-        Main entry point to run the aggregation.
-        """
-        if method_options is None:
-            method_options = {}
-
-        if not selected_llms:
-            selected_llms = self.llms
-        
-        # Validate models
-        for model in selected_llms:
-            self._validate_model(model)
-
-        # 1. Prepare Prompts
-        sys_base = self.prompts['system_base']
-        if system_prompt:
-            sys_full = f"{system_prompt}\n\n{sys_base}"
-        else:
-            sys_full = sys_base
-
+    def _prepare_base_prompt(self, method: str, user_prompt: str, method_options: Dict[str, Any]) -> str:
+        """Helper to prepare the base prompt for a method."""
         method_config = self.prompts['methods'].get(method)
         if not method_config:
             raise ValueError(f"Unknown method: {method}")
 
-        # specific prompt construction
         if method in ['VoteYesNo', 'VoteOptions']:
             options = method_options.get('options')
             if not options:
                 if method == 'VoteYesNo':
                     options = method_config.get('default_options')
                 else:
-                    # If CLI didn't pass list, check config just in case, or fail
                     raise ValueError("VoteOptions method requires options to be specified (e.g. --options 'A,B,C').")
             
-            # Make sure options is a list if it's a string
             if isinstance(options, str):
                 options = [x.strip() for x in options.split(',')]
             
-            # For formatting prompt, we might want string representation or list
             prompt_text = method_config['instruction'].format(options=options, prompt=user_prompt)
             if not method_options.get('allow_abstain', True):
                  prompt_text += " Abstaining is not allowed."
@@ -211,17 +188,30 @@ class Magi:
              prompt_text = method_config['instruction'].format(prompt=user_prompt, abstain_instruction=abstain_instr)
         else:
              prompt_text = method_config['instruction'].format(prompt=user_prompt)
+        
+        return prompt_text
 
-        # 2. Invoke LLMs in parallel
-        tasks = [self.invoke_llm(model, sys_full, prompt_text) for model in selected_llms]
+    async def _gather_responses(self, selected_llms: List[str], system_prompt: str, prompts: Any) -> List[Dict[str, Any]]:
+        """
+        Executes the round. prompts can be a single string (for all) or a dict {model: prompt}.
+        """
+        tasks = []
+        for model in selected_llms:
+            if isinstance(prompts, dict):
+                p_text = prompts.get(model, prompts.get('default', ""))
+            else:
+                p_text = prompts
+            
+            tasks.append(self.invoke_llm(model, system_prompt, p_text))
+            
         results = await asyncio.gather(*tasks)
+        return [r for r in results if "error" not in r]
 
-        valid_results = [r for r in results if "error" not in r]
+    async def _generate_report(self, method: str, user_prompt: str, method_options: Dict[str, Any], valid_results: List[Dict[str, Any]]) -> str:
+        """Generates the report from results."""
         if not valid_results:
             return "Error: No valid responses from LLMs."
 
-        # 3. Aggregation Logic
-        
         # Assign Pseudonyms
         mapping = generate_pseudonyms([r['model'] for r in valid_results])
         anonymized_responses = []
@@ -237,7 +227,6 @@ class Magi:
         if method in ['VoteYesNo', 'VoteOptions']:
             # Count votes
             votes = {}
-            # Count each vote
             for r in valid_results:
                 vote = str(r['response']).lower()
                 votes[vote] = votes.get(vote, 0) + 1
@@ -245,45 +234,36 @@ class Magi:
             total_votes = len(valid_results)
             threshold = method_options.get('vote_threshold', 0.5)
             
-            # Determine winner
             winner = "No Majority"
-            
-            # If threshold is percentage of total
             for option, count in votes.items():
                 if count / total_votes > threshold:
                      winner = option
-                     # Break if found
                      break
             
             result_summary = f"Votes: {votes}. Winner: {winner} (Threshold: >{threshold:.0%})"
             
-            # Select Rapporteur: Highest confidence who voted for the winner
             if winner != "No Majority":
                 candidates = [r for r in valid_results if str(r['response']).lower() == winner]
             else:
-                candidates = valid_results # Fallback
+                candidates = valid_results
             
             if not candidates:
                  candidates = valid_results
 
-            # Tie breaking
             if candidates:
                 max_conf = max(c['confidence_score'] for c in candidates)
                 best_candidates = [c for c in candidates if c['confidence_score'] == max_conf]
                 rapporteur_data = resolve_tie(best_candidates)
                 rapporteur_name = rapporteur_data['model']
             else:
-                # Should not happen given logic above, but safe guard
                 rapporteur_name = valid_results[0]['model']
             
-            # Rapporteur Prompt
             rap_prompt = self._build_rapporteur_prompt(method, user_prompt, responses_text, result_summary)
             if method_options.get('rapporteur_prompt'):
                 rap_prompt += f"\n\n{method_options.get('rapporteur_prompt')}"
 
             summary = await self.invoke_raw_llm(rapporteur_name, "You are a helpful assistant.", rap_prompt)
             
-            # Vote Breakdown
             breakdown = []
             for r in valid_results:
                  breakdown.append(f" - {r['model']}: {r['response']} (Confidence: {r['confidence_score']:.2f})")
@@ -292,7 +272,6 @@ class Magi:
             final_output = f"Result: {winner}\nDetails: {result_summary}\n\nVote Breakdown:\n{breakdown_str}\n\nRapporteur ({rapporteur_name}) Summary:\n{summary}"
 
         elif method == 'Majority':
-             # "Ask the LLM gives the highest confidence score to summarise the majoirty views"
              max_conf = max(r['confidence_score'] for r in valid_results)
              best_candidates = [r for r in valid_results if r['confidence_score'] == max_conf]
              rapporteur_data = resolve_tie(best_candidates)
@@ -305,7 +284,6 @@ class Magi:
              final_output = f"Majority View Summary (by {rapporteur_name}):\n{summary}"
 
         elif method == 'Consensus':
-             # "Ask the LLM gives the highest confidence score to identify the common ground"
              max_conf = max(r['confidence_score'] for r in valid_results)
              best_candidates = [r for r in valid_results if r['confidence_score'] == max_conf]
              rapporteur_data = resolve_tie(best_candidates)
@@ -318,7 +296,6 @@ class Magi:
              final_output = f"Consensus/Common Ground (by {rapporteur_name}):\n{summary}"
 
         elif method == 'Minority':
-             # "Ask the LLM gives the lowest confidence score to gaps"
              min_conf = min(r['confidence_score'] for r in valid_results)
              worst_candidates = [r for r in valid_results if r['confidence_score'] == min_conf]
              rapporteur_data = resolve_tie(worst_candidates)
@@ -331,7 +308,6 @@ class Magi:
              final_output = f"Minority/Gap Analysis (by {rapporteur_name}):\n{summary}"
 
         elif method == 'Probability':
-             # Filter out abstentions (-1.0)
              filtered_results = [r for r in valid_results if r['confidence_score'] != -1.0]
              
              if not filtered_results:
@@ -340,18 +316,15 @@ class Magi:
                  else:
                       return "Error: No valid probabilities provided despite forced mode."
 
-             # Calculate average and median
              conf_scores = [r['confidence_score'] for r in filtered_results]
              avg_conf = sum(conf_scores) / len(conf_scores)
              
              sorted_results = sorted(filtered_results, key=lambda x: x['confidence_score'])
              n = len(sorted_results)
-             # Median selection
              median_idx = n // 2
              median_result = sorted_results[median_idx]
              median_conf = median_result['confidence_score']
              
-             # In case of tie for median value, pick random (resolve_tie handles list)
              median_candidates = [r for r in filtered_results if r['confidence_score'] == median_conf]
              rapporteur_data = resolve_tie(median_candidates)
              rapporteur_name = rapporteur_data['model']
@@ -361,9 +334,6 @@ class Magi:
              
              result_summary = f"Average: {avg_conf:.2f} (Median: {median_conf:.2f}, Range: {min_conf:.2f} - {max_conf:.2f})"
              
-             # Rebuild responses_text to exclude abstainers or include them? 
-             # "discard this result" implies excluding.
-             # Let's filter responses_text for consistency with result_summary
              filtered_responses = []
              for r in filtered_results:
                  pseudo = mapping[r['model']]
@@ -382,3 +352,68 @@ class Magi:
             final_output = final_output.replace(pseudo, name)
 
         return final_output
+
+    async def run(self, user_prompt: str, system_prompt: Optional[str] = None, selected_llms: Optional[List[str]] = None, method: str = 'VoteYesNo', method_options: Dict[str, Any] = None, deliberative: bool = False) -> str:
+        """
+        Main entry point to run the aggregation.
+        """
+        if method_options is None:
+            method_options = {}
+
+        if not selected_llms:
+            selected_llms = self.llms
+        
+        # Validate models
+        for model in selected_llms:
+            self._validate_model(model)
+
+        # 1. Prepare System Prompt
+        sys_base = self.prompts['system_base']
+        if system_prompt:
+            sys_full = f"{system_prompt}\n\n{sys_base}"
+        else:
+            sys_full = sys_base
+
+        # 2. Round 1
+        base_prompt = self._prepare_base_prompt(method, user_prompt, method_options)
+        
+        # Invoke LLMs
+        results1 = await self._gather_responses(selected_llms, sys_full, base_prompt)
+        
+        if not results1:
+             return "Error: No valid responses from LLMs in Round 1."
+             
+        report1 = await self._generate_report(method, user_prompt, method_options, results1)
+        
+        if not deliberative:
+            return report1
+            
+        # 3. Round 2 (Deliberative)
+        mapping = generate_pseudonyms([r['model'] for r in results1])
+        
+        prompts_round2 = {}
+        for model in selected_llms:
+            other_responses = []
+            for r in results1:
+                if r['model'] != model:
+                    pseudo = mapping[r['model']]
+                    other_responses.append(f"Participant {pseudo}: {r['response']} (Reason: {r['reason']})")
+            
+            if not other_responses:
+                prompts_round2[model] = base_prompt
+            else:
+                peer_text = "\n".join(other_responses)
+                delib_instr = self.prompts.get('deliberative_instruction', "").format(
+                    peer_responses=peer_text,
+                    original_prompt=base_prompt
+                )
+                prompts_round2[model] = delib_instr
+
+        results2 = await self._gather_responses(selected_llms, sys_full, prompts_round2)
+        
+        if not results2:
+             return f"Pre-Deliberation Results:\n{report1}\n\n{'='*40}\n\nPost-Deliberation Results:\nError: No valid responses in Round 2."
+             
+        report2 = await self._generate_report(method, user_prompt, method_options, results2)
+        
+        return f"Pre-Deliberation Results:\n{report1}\n\n{'='*40}\n\nPost-Deliberation Results:\n{report2}"

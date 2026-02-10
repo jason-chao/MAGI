@@ -8,6 +8,16 @@ system_base: |
   }
   Do not include any markdown formatting or code blocks (like ```json). Just the raw JSON string.
 
+deliberative_instruction: |
+  Below are the initial views from other participants:
+  {peer_responses}
+
+  Please reconsider the original issue:
+  {original_prompt}
+
+  Critically reflect on the views of others (which may or may not be correct) and your own initial view.
+  Then, provide your updated response/decision.
+
 methods:
   VoteYesNo:
     instruction: |
