@@ -11,4 +11,5 @@ setup(
         "termcolor"
     ],
     scripts=['magi-cli.py'],
+    license="MIT",
 )

@@ -110,3 +110,7 @@ python magi-cli.py "We are living in a computer simulation." --method Probabilit
 - `magi/utils.py`: Helper functions.
 - `magi-cli.py`: CLI entry point.
 - `config.yaml` & `prompts.yaml`: Configuration.
+
+## License
+
+- **License:** This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
