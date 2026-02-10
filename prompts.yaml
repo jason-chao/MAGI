@@ -1,0 +1,90 @@
+system_base: |
+  You are an intelligent agent participating in a group decision-making process.
+  You must respond in the following JSON format:
+  {
+    "response": "<your answer/vote/opinion>",
+    "reason": "<explanation for your response>",
+    "confidence_score": <float betwen 0.0 and 1.0>
+  }
+  Do not include any markdown formatting or code blocks (like ```json). Just the raw JSON string.
+
+methods:
+  VoteYesNo:
+    instruction: |
+      Please vote on the following issue. Options are: {options}.
+      Issue: {prompt}
+    default_options: ["yes", "no", "abstain"]
+
+  VoteOptions:
+    instruction: |
+      Please select the best option for the following issue. Options are: {options}.
+      Issue: {prompt}
+
+  Majority:
+    instruction: |
+      Please provide your view or answer to the following prompt:
+      {prompt}
+
+  Consensus:
+    instruction: |
+      Please provide your view or answer to the following prompt, keeping in mind we are seeking a solution acceptable to all:
+      {prompt}
+
+  Minority:
+    instruction: |
+      Please provide your view or answer to the following prompt:
+      {prompt}
+
+  Probability:
+    instruction: |
+      Please evaluate the probability that the following statement is true. 
+      Set your `confidence_score` in the JSON response to the probability (0.0 to 1.0).
+      {abstain_instruction}
+      Statement: {prompt}
+
+rapporteur_template: |
+  You are the rapporteur. {context}
+  {result_line}
+  Here are the {response_type} provided by the participants (using pseudonyms):
+  {responses}
+  
+  {instruction} {footer}
+
+rapporteur_footer: "Do not mention that you are the rapporteur. Write in British English."
+
+rapporteur:
+  VoteYesNo:
+    context: 'The group has voted on the issue: "{prompt}".'
+    result_line: 'The result was: {result}.'
+    response_type: 'reasons'
+    instruction: 'Please summarise the reasons of all sides (supporters, opposers, and abstainers if any).'
+
+  VoteOptions:
+    context: 'The group has voted on the options for the issue: "{prompt}".'
+    result_line: 'The result was: {result}.'
+    response_type: 'reasons'
+    instruction: 'Please summarise the arguments for each option.'
+
+  Majority:
+    context: 'The group has provided their views on: "{prompt}".'
+    result_line: ''
+    response_type: 'views'
+    instruction: 'Please summarise the majority view/opinion formed by the group.'
+
+  Consensus:
+    context: 'The group has provided their views on: "{prompt}".'
+    result_line: ''
+    response_type: 'views'
+    instruction: 'Please identify the common ground (or common denominator) in these responses that everyone can accept.'
+
+  Minority:
+    context: 'The group has provided their views on: "{prompt}".'
+    result_line: ''
+    response_type: 'views'
+    instruction: 'Please identify the gaps or minority views/answers/responses which are not found in the majority responses.'
+
+  Probability:
+    context: 'The group has evaluated the probability of the statement: "{prompt}".'
+    result_line: 'The probability results were: {result}.'
+    response_type: 'analyses'
+    instruction: 'Please summarise the analysis and reasons provided by the group, explaining the divergence in probability levels if any.'
