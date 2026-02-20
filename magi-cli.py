@@ -15,7 +15,7 @@ def main():
     parser.add_argument("prompt", help="The user prompt")
     parser.add_argument("--system-prompt", help="Optional system prompt", default=None)
     parser.add_argument("--llms", help="Comma-separated list of LLMs to use", default=None)
-    parser.add_argument("--method", help="Aggregation method (VoteYesNo, VoteOptions, Majority, Consensus, Minority, Probability)", default="VoteYesNo")
+    parser.add_argument("--method", help="Aggregation method (VoteYesNo, VoteOptions, Majority, Consensus, Minority, Probability, Compose)", default="VoteYesNo")
     parser.add_argument("--vote-threshold", help="Threshold for vote method (default 0.5)", type=float, default=0.5)
     parser.add_argument("--no-abstain", help="Disallow abstain in VoteYesNo/Probability method", action="store_true")
     parser.add_argument("--options", help="Comma-separated options for VoteOptions method", default=None)

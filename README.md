@@ -16,6 +16,7 @@ Technically, MAGI is a Python-based CLI tool that leverages `litellm` to invoke 
   - **Consensus**: Find common ground between differing viewpoints.
   - **Minority Report**: Specifically hunt for blind spots and dissenting opinions.
   - **Probability**: Estimate the likelihood of future events.
+  - **Compose**: Generate content (poems, code, articles) and conduct a blind peer-review to rank the best candidates.
 - **Deliberation**: Enables a deliberative round where agents review and critique each other's initial responses before finalizing their own.
 - **Rapporteur System**: The most confident AI is chosen to present the group's findings.
 - **Anonymity**: Agents deliberate using pseudonyms to prevent brand bias.
@@ -104,12 +105,18 @@ Assess the probability or confidence in a statement.
 python magi-cli.py "We are living in a computer simulation." --method Probability
 ```
 
+**7. Compose**
+Generate content and rank it via blind peer review.
+```bash
+python magi-cli.py "Write a short poem about the future of AI." --method Compose
+```
+
 ### Arguments
 
 - `prompt`: The question or issue to discuss.
 - `--system-prompt`: Optional context.
 - `--llms`: Comma-separated list of models (overrides config).
-- `--method`: `VoteYesNo` (default), `VoteOptions`, `Majority`, `Consensus`, `Minority`, or `Probability`.
+- `--method`: `VoteYesNo` (default), `VoteOptions`, `Majority`, `Consensus`, `Minority`, `Probability`, or `Compose`.
 - `--options`: Comma-separated list of options for `VoteOptions` method.
 - `--vote-threshold`: Threshold for voting (default 0.5).
 - `--deliberative`: Enable a second round where agents review peer responses (default: False).

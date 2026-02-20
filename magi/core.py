@@ -307,6 +307,96 @@ class Magi:
              summary = await self.invoke_raw_llm(rapporteur_name, "You are a helpful assistant.", rap_prompt)
              final_output = f"Minority/Gap Analysis (by {rapporteur_name}):\n{summary}"
 
+        elif method == 'Compose':
+             # 1. Prepare candidates
+             candidates_text = []
+             candidate_map = {} # Pseudo -> Model
+             model_to_pseudo = generate_pseudonyms([r['model'] for r in valid_results])
+             
+             for r in valid_results:
+                 pseudo = model_to_pseudo[r['model']]
+                 candidate_map[pseudo] = r['model']
+                 candidates_text.append(f"--- Candidate {pseudo} ---\n{r['response']}\n-----------------------")
+             
+             all_candidates_str = "\n".join(candidates_text)
+             
+             # 2. Ask for ratings
+             rating_prompt_template = self.prompts['methods']['Compose'].get('rating_instruction', "")
+             if not rating_prompt_template:
+                 return "Error: Missing rating instruction for Compose."
+                 
+             rating_prompt = rating_prompt_template.format(prompt=user_prompt, candidates=all_candidates_str)
+             
+             rating_tasks = []
+             raters = [r['model'] for r in valid_results]
+             
+             for model in raters:
+                 rating_tasks.append(self.invoke_llm(model, self.prompts['system_base'], rating_prompt))
+                 
+             rating_results = await asyncio.gather(*rating_tasks)
+             
+             # 3. Aggregate Ratings
+             scores = {pseudo: [] for pseudo in candidate_map}
+             justifications = {pseudo: [] for pseudo in candidate_map}
+             
+             for res in rating_results:
+                 if "error" in res:
+                     continue
+                 
+                 rater_model = res['model']
+                 ratings = res.get('response') # Expecting dict
+                 
+                 if isinstance(ratings, dict):
+                     for cand_key, rating_data in ratings.items():
+                         target_pseudo = None
+                         for p in candidate_map:
+                             if p in cand_key:
+                                 target_pseudo = p
+                                 break
+                         
+                         if target_pseudo:
+                             try:
+                                 val = float(rating_data.get('score', 0))
+                                 just = rating_data.get('justification', '')
+                                 scores[target_pseudo].append(val)
+                                 justifications[target_pseudo].append(f"{rater_model}: {val} - {just}")
+                             except (ValueError, TypeError):
+                                 pass
+            
+             # 4. Compute Final Scores & Rank
+             ranked = []
+             for pseudo, vals in scores.items():
+                 avg = sum(vals) / len(vals) if vals else 0
+                 real_name = candidate_map[pseudo]
+                 ranked.append({
+                     "pseudo": pseudo,
+                     "model": real_name,
+                     "average": avg,
+                     "details": justifications[pseudo],
+                     "text": next((r['response'] for r in valid_results if r['model'] == real_name), "")
+                 })
+             
+             ranked.sort(key=lambda x: x['average'], reverse=True)
+             
+             # 5. Format Output
+             output_lines = [f"Compose Results for: {user_prompt}", "="*40]
+             
+             for i, item in enumerate(ranked, 1):
+                 output_lines.append(f"\nRank {i}: {item['model']} (as {item['pseudo']})")
+                 output_lines.append(f"Average Score: {item['average']:.2f}")
+                 output_lines.append("-" * 20)
+                 output_lines.append(f"Composition:\n{item['text']}")
+                 output_lines.append("-" * 20)
+                 output_lines.append("Peer Reviews:")
+                 if item['details']:
+                     for d in item['details']:
+                         output_lines.append(f"  * {d}")
+                 else:
+                     output_lines.append("  (No ratings received)")
+                 output_lines.append("="*40)
+                 
+             final_output = "\n".join(output_lines)
+
         elif method == 'Probability':
              filtered_results = [r for r in valid_results if r['confidence_score'] != -1.0]
              

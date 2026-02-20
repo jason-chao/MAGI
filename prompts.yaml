@@ -52,6 +52,28 @@ methods:
       {abstain_instruction}
       Statement: {prompt}
 
+  Compose:
+    instruction: |
+      Please generate a high-quality response to the following prompt. Ensure it is well-structured and complete.
+      Prompt: {prompt}
+    rating_instruction: |
+      Please review the following candidate responses to the original prompt: "{prompt}".
+
+      Candidates:
+      {candidates}
+
+      You must rate each candidate on a scale of 0 to 10 (10 being best).
+      You must provide a justification for your rating.
+
+      Your output must be a JSON object with the following structure inside the "response" field:
+      {{
+        "Candidate <Name>": {{
+          "score": <number>,
+          "justification": "<string>"
+        }},
+        ...
+      }}
+
 rapporteur_template: |
   You are the rapporteur. {context}
   {result_line}
