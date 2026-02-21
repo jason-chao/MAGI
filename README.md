@@ -134,3 +134,23 @@ python magi-cli.py "Write a short poem about the future of AI." --method Compose
 ## License
 
 - **License:** This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
+
+## Testing
+
+Magi includes a comprehensive test suite.
+
+### Unit Tests
+Run the fast, mocked unit tests to verify logic:
+```bash
+python3 tests/test_core.py
+```
+
+### Integration Tests (Live)
+Run the matrix integration tests to verify end-to-end functionality with real LLMs. **Warning: This incurs API costs.**
+```bash
+pytest tests/test_integration_matrix.py
+```
+
+**Test Artifacts:**
+Integration test outputs are automatically saved as Markdown files in the `test_results/` directory. You can review these files to verify the quality of the LLM outputs.
+

@@ -2,3 +2,5 @@ litellm
 pyyaml
 python-dotenv
 termcolor
+pytest
+pytest-asyncio
