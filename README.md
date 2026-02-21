@@ -142,7 +142,7 @@ Magi includes a comprehensive test suite.
 ### Unit Tests
 Run the fast, mocked unit tests to verify logic:
 ```bash
-python3 tests/test_core.py
+pytest tests/test_core.py
 ```
 
 ### Integration Tests (Live)

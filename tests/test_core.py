@@ -1,7 +1,13 @@
 import unittest
 import asyncio
 import json
+import sys
+import os
 from unittest.mock import patch, MagicMock
+
+# Add project root to sys.path
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from magi.core import Magi
 
 # Mock Prompt Configuration matching prompts.yaml structure

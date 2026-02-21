@@ -4,7 +4,7 @@ import argparse
 import os
 import yaml
 from magi.core import Magi
-from magi.utils import load_yaml
+from magi.utils import load_yaml, get_default_prompts_path
 from dotenv import load_dotenv
 
 # Load env variables
@@ -37,8 +37,12 @@ def main():
     try:
         prompts = load_yaml(args.prompts)
     except FileNotFoundError:
-        print(f"Prompts file not found: {args.prompts}")
-        return
+        # Fallback to default prompts if not found and using default filename
+        if args.prompts == "prompts.yaml" and os.path.exists(get_default_prompts_path()):
+             prompts = load_yaml(get_default_prompts_path())
+        else:
+             print(f"Prompts file not found: {args.prompts}")
+             return
 
     # Override config with args
     if args.llms:

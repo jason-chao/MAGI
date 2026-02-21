@@ -4,6 +4,10 @@ import os
 import sys
 import yaml
 import datetime
+from dotenv import load_dotenv
+
+# Load env variables
+load_dotenv()
 
 # Helper to find config files relative to this test file
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -36,7 +40,7 @@ from magi.core import Magi
 
 def load_settings():
     config_path = os.path.join(BASE_DIR, "config.yaml")
-    prompts_path = os.path.join(BASE_DIR, "prompts.yaml")
+    prompts_path = os.path.join(BASE_DIR, "magi", "prompts.yaml")
     
     if not os.path.exists(config_path) or not os.path.exists(prompts_path):
         pytest.skip("Configuration files not found. Skipping integration tests.")
