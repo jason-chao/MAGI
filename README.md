@@ -104,21 +104,21 @@ An optional second round where each agent reads its peers' anonymous responses b
   ┌──────────────────────────────────────────────────────────────┐
   │  Round 1                                                     │
   │                                                              │
-  │  Prompt ──► LLM 1 ──► response₁                             │
-  │         ──► LLM 2 ──► response₂                             │
-  │         ──► LLM N ──► responseₙ                             │
+  │  Prompt ──► LLM 1 ──► response1                              │
+  │         ──► LLM 2 ──► response2                              │
+  │         ──► LLM N ──► responseN                              │
   │                   │                                          │
   │          Aggregate + Rapporteur ──► Pre-Deliberation Report  │
   └──────────────────────────────────────────────────────────────┘
-                         │  responses shared anonymously
-                         ▼  (agents see peers' views, not their names)
+                      │  responses shared anonymously
+                      ▼  (agents see peers' views, not their names)
   ┌──────────────────────────────────────────────────────────────┐
   │  Round 2                                                     │
   │                                                              │
-  │  Prompt + peers' Round 1 responses                          │
-  │         ──► LLM 1  (sees 2…N)   ──► response₁'             │
-  │         ──► LLM 2  (sees 1,3…N) ──► response₂'             │
-  │         ──► LLM N  (sees 1…N-1) ──► responseₙ'             │
+  │  Prompt + peers' Round 1 responses                           │
+  │         ──► LLM 1  (sees 2..N)   ──► response1'              │
+  │         ──► LLM 2  (sees 1,3..N) ──► response2'              │
+  │         ──► LLM N  (sees 1..N-1) ──► responseN'              │
   │                   │                                          │
   │          Aggregate + Rapporteur ──► Post-Deliberation Report │
   └──────────────────────────────────────────────────────────────┘
