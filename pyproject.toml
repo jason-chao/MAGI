@@ -1,10 +1,10 @@
 [build-system]
 requires = ["setuptools>=68", "wheel"]
-build-backend = "setuptools.backends.legacy:build"
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "magi-core"
-version = "0.2.0"
+version = "0.3.1"
 description = "Multi-Agent Group Intelligence: orchestrate a council of LLMs to deliberate on complex questions"
 readme = "README.md"
 license = { file = "LICENSE" }

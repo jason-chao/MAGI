@@ -213,7 +213,8 @@ def main():
         sys.exit(0 if all_ok else 1)
 
     print(f"Method : {args.method}")
-    print(f"Models : {', '.join(selected_llms)}")
+    display_models = [s[0] if isinstance(s, list) else s for s in selected_llms]
+    print(f"Models : {', '.join(display_models)}")
     if args.deliberative:
         print("Mode   : Deliberative")
     print("-" * 50)

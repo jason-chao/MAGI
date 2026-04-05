@@ -1,0 +1,79 @@
+# config.sample.yaml — copy this to config.yaml and fill in your choices.
+#
+# API keys must be set as environment variables (or in a .env file):
+#   OPENAI_API_KEY      — for OpenAI models
+#   ANTHROPIC_API_KEY   — for Anthropic / Claude models
+#   GEMINI_API_KEY      — for Google Gemini models
+#
+# Model names follow the LiteLLM convention: provider/model-name.
+# Supported providers: openai, anthropic, gemini, azure, ollama, and more.
+# See https://docs.litellm.ai/docs/providers for the full list.
+
+# ---------------------------------------------------------------------------
+# llms — the council of models that will deliberate on each prompt.
+#
+# Each entry is either:
+#   - A plain string          → single model, no fallback
+#   - A list of strings       → fallback chain: the first model is tried first;
+#                               if it returns a permanent error (deprecated,
+#                               not found, auth failure, rate limit) the next
+#                               model in the list is tried automatically.
+#
+# Tips:
+#   • Use at least 3 models for meaningful deliberation.
+#   • Mixing providers reduces correlated failures.
+#   • Pair expensive flagship models with cheaper fallbacks.
+# ---------------------------------------------------------------------------
+llms:
+  # Plain string — no fallback
+  - openai/gpt-4o
+
+  # Two-model fallback chain — if gpt-4o-mini is unavailable, falls back to gpt-4o
+  - - openai/gpt-4o-mini
+    - openai/gpt-4o
+
+  # Three-model fallback chain across providers
+  - - anthropic/claude-sonnet-4-6
+    - anthropic/claude-haiku-4-5-20251001
+    - openai/gpt-4o-mini
+
+  # Additional models to broaden the council (uncomment as needed):
+  # - anthropic/claude-opus-4-6
+  # - gemini/gemini-2.5-pro-preview-03-25
+  # - - gemini/gemini-2.5-flash
+  #   - openai/gpt-4o-mini
+
+# ---------------------------------------------------------------------------
+# defaults — global settings applied when not overridden by CLI flags.
+# ---------------------------------------------------------------------------
+defaults:
+  # Default aggregation method when --method is not specified.
+  # Choices: VoteYesNo, VoteOptions, Majority, Consensus, Minority,
+  #          Probability, Compose, Synthesis
+  method: VoteYesNo
+
+  # Fraction of votes required to declare a winner in VoteYesNo / VoteOptions.
+  # Must be > 0 and ≤ 1. At 0.5 a strict majority is required.
+  vote_threshold: 0.5
+
+  # Whether models may abstain in VoteYesNo or Probability.
+  # Set to false to force every model to commit to an answer.
+  allow_abstain: true
+
+  # Maximum number of retries when a model returns a null or malformed response.
+  # Does not apply to permanent errors (those trigger the fallback chain instead).
+  max_retries: 2
+
+  # Minimum number of models that must respond successfully for a result to be
+  # produced. If fewer models respond the run is aborted with a quorum error.
+  min_models: 2
+
+  # Seconds to wait for a single LLM API call before abandoning it.
+  # Increase if you use large models or long prompts; decrease for faster feedback.
+  request_timeout: 60
+
+# ---------------------------------------------------------------------------
+# litellm_debug_mode — set to true to print raw LiteLLM API traffic to stderr.
+# Useful for diagnosing auth errors or unexpected model responses.
+# ---------------------------------------------------------------------------
+litellm_debug_mode: false
