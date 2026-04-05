@@ -23,6 +23,107 @@ MAGI sends a question to all configured models in parallel. Each model responds 
 
 **Synthesis** is the most inclusive mode — unlike `Majority` (which amplifies the dominant view) or `Consensus` (which finds the lowest common denominator), `Synthesis` instructs the rapporteur to weave every argument, nuance, and disagreement into a single coherent narrative.
 
+## Decision Flows
+
+### Standard flow (all methods)
+
+Every deliberation follows this pipeline regardless of mode:
+
+```
+  ┌──────────────────────────────────────────────────┐
+  │                    User Prompt                   │
+  └────────────────────────┬─────────────────────────┘
+                           │  dispatched in parallel
+           ┌───────────────┼───────────────┐
+           ▼               ▼               ▼
+  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐
+  │   LLM  1    │  │   LLM  2    │  │   LLM  N    │
+  │  response   │  │  response   │  │  response   │
+  │  reason     │  │  reason     │  │  reason     │
+  │  confidence │  │  confidence │  │  confidence │
+  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘
+         └────────────────┼────────────────┘
+                          │  results collected
+                          ▼
+             ┌────────────────────────┐
+             │       Aggregate        │
+             │   (method-dependent)   │
+             └────────────┬───────────┘
+                          │
+                          ▼
+             ┌────────────────────────┐
+             │  Rapporteur selected   │
+             │  (by confidence score) │
+             └────────────┬───────────┘
+                          │
+                          ▼
+             ┌────────────────────────┐
+             │      Final Report      │
+             │   text  │  JSON        │
+             └────────────────────────┘
+```
+
+### Aggregation by method
+
+The "Aggregate" step is what distinguishes each mode:
+
+```
+  Responses collected
+         │
+         ├─ VoteYesNo / VoteOptions ──► tally votes ──► declare winner (if > threshold)
+         │                                                       │
+         │                                           rapporteur summarises vote
+         │
+         ├─ Majority ──────────────────────────────► highest-confidence model
+         │                                           summarises prevailing view
+         │
+         ├─ Consensus ─────────────────────────────► highest-confidence model
+         │                                           identifies common ground
+         │
+         ├─ Minority ──────────────────────────────► lowest-confidence model
+         │                                           surfaces dissent and gaps
+         │
+         ├─ Probability ───────────────────────────► compute average / median score
+         │                                           median model writes analysis
+         │
+         ├─ Compose ───────────────────────────────► generate texts (Round 1)
+         │                                                │
+         │                                           blind peer rating (Round 2)
+         │                                                │
+         │                                           ranked output, no rapporteur
+         │
+         └─ Synthesis ─────────────────────────────► highest-confidence model
+                                                     weaves ALL views into one narrative
+```
+
+### Deliberative mode (`--deliberative`)
+
+An optional second round where each agent reads its peers' anonymous responses before finalising:
+
+```
+  ┌──────────────────────────────────────────────────────────────┐
+  │  Round 1                                                     │
+  │                                                              │
+  │  Prompt ──► LLM 1 ──► response₁                             │
+  │         ──► LLM 2 ──► response₂                             │
+  │         ──► LLM N ──► responseₙ                             │
+  │                   │                                          │
+  │          Aggregate + Rapporteur ──► Pre-Deliberation Report  │
+  └──────────────────────────────────────────────────────────────┘
+                         │  responses shared anonymously
+                         ▼  (agents see peers' views, not their names)
+  ┌──────────────────────────────────────────────────────────────┐
+  │  Round 2                                                     │
+  │                                                              │
+  │  Prompt + peers' Round 1 responses                          │
+  │         ──► LLM 1  (sees 2…N)   ──► response₁'             │
+  │         ──► LLM 2  (sees 1,3…N) ──► response₂'             │
+  │         ──► LLM N  (sees 1…N-1) ──► responseₙ'             │
+  │                   │                                          │
+  │          Aggregate + Rapporteur ──► Post-Deliberation Report │
+  └──────────────────────────────────────────────────────────────┘
+```
+
 ## Installation
 
 ### From PyPI
@@ -444,6 +545,26 @@ config.yaml        Default model selection
 - `Synthesis` uses the same rapporteur selection as `Majority` but with a prompt that mandates comprehensive inclusion of all perspectives.
 - `run()` and `run_structured()` share a single `_deliberate()` engine; the only difference is whether the result dict is rendered to Markdown or returned as-is.
 - Fallback chains trigger on permanent errors (model not found, deprecated, auth) and rate limits; timeouts and unknown errors retry the primary only.
+
+### Fallback chain
+
+Each slot in `config.yaml` can be a list; MAGI walks the list when a model is permanently unavailable:
+
+```
+  Slot: [primary, fallback-1, fallback-2, …]
+
+  ┌───────────┐  deprecated /     ┌─────────────┐  error again  ┌─────────────┐
+  │  Primary  │  not found /  ──► │  Fallback 1 │  ──────────►  │  Fallback 2 │
+  │  Model    │  auth error /     │             │               │             │
+  └───────────┘  rate limit       └─────────────┘               └──────┬──────┘
+       │ ok                            │ ok                             │ all failed
+       ▼                               ▼                                ▼
+  result used                     result used +                error logged in
+                                  fallback noted               round errors[]
+                                  in report
+```
+
+Timeout and unknown errors retry the **primary only** — they do not burn through the fallback chain.
 
 ## Security
 
