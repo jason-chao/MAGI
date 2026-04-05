@@ -1,5 +1,7 @@
 # MAGI: Multi-Agent Group Intelligence
 
+[![PyPI version](https://img.shields.io/pypi/v/magi-core.svg)](https://pypi.org/project/magi-core/)
+
 **What if you could consult a council of diverse artificial minds before making a tough decision?**
 
 MAGI is a decision-support system inspired by the **MAGI supercomputer from *Neon Genesis Evangelion***. In the anime, three distinct AI personas deliberate to govern Tokyo-3. Similarly, this project orchestrates a council of multiple LLMs to deliberate, vote, and reason about complex moral, ethical, and practical questions. By aggregating diverse AI perspectives, MAGI simulates a more human-like deliberation process — revealing consensus, surfacing minority risks, and synthesising collective wisdom.
