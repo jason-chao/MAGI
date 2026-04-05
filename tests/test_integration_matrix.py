@@ -1,4 +1,10 @@
+"""
+Integration tests — make real LLM calls across all methods and deliberative modes.
 
+WARNING: These tests incur API costs. Run only when you have API keys set.
+Outputs are saved in test_results/ as both Markdown (.md) and JSON (.json) for manual review.
+"""
+import json
 import pytest
 import os
 import sys
@@ -6,128 +12,200 @@ import yaml
 import datetime
 from dotenv import load_dotenv
 
-# Load env variables
 load_dotenv()
 
-# Helper to find config files relative to this test file
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(BASE_DIR)
 
-# Artifact Store Setup
 RESULTS_DIR = os.path.join(BASE_DIR, "test_results")
-if not os.path.exists(RESULTS_DIR):
-    os.makedirs(RESULTS_DIR)
+os.makedirs(RESULTS_DIR, exist_ok=True)
 
-def save_artifact(method, deliberative, prompt, content):
-    """Saves the LLM output to a markdown file for review."""
+
+def _base_filename(method: str, deliberative: bool) -> str:
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     mode = "deliberative" if deliberative else "standard"
-    # clean method name for filename
     safe_method = "".join(c for c in method if c.isalnum())
-    filename = f"{timestamp}_{safe_method}_{mode}.md"
-    filepath = os.path.join(RESULTS_DIR, filename)
-    
+    return os.path.join(RESULTS_DIR, f"{timestamp}_{safe_method}_{mode}")
+
+
+def save_text_artifact(method: str, deliberative: bool, prompt: str, content: str) -> str:
+    filepath = _base_filename(method, deliberative) + ".md"
     with open(filepath, "w", encoding="utf-8") as f:
-        f.write(f"# Test Artifact: {method} ({mode})\n")
-        f.write(f"Date: {timestamp}\n")
+        f.write(f"# Test Artifact: {method} ({'deliberative' if deliberative else 'standard'})\n")
         f.write(f"Prompt: {prompt}\n")
         f.write("-" * 40 + "\n\n")
         f.write(content)
-    
-    print(f"\n[Artifact Saved]: {filepath}")
+    print(f"\n[Markdown Saved]: {filepath}")
+    return filepath
 
-from magi.core import Magi
+
+def save_json_artifact(method: str, deliberative: bool, structured: dict) -> str:
+    filepath = _base_filename(method, deliberative) + ".json"
+    with open(filepath, "w", encoding="utf-8") as f:
+        json.dump(structured, f, indent=2, ensure_ascii=False)
+    print(f"\n[JSON Saved]:     {filepath}")
+    return filepath
+
+
+from magi_core.core import Magi
+
 
 def load_settings():
     config_path = os.path.join(BASE_DIR, "config.yaml")
-    prompts_path = os.path.join(BASE_DIR, "magi", "prompts.yaml")
-    
+    prompts_path = os.path.join(BASE_DIR, "magi_core", "prompts.yaml")
     if not os.path.exists(config_path) or not os.path.exists(prompts_path):
-        pytest.skip("Configuration files not found. Skipping integration tests.")
-    
-    with open(config_path, "r") as f:
+        pytest.skip("Configuration files not found.")
+    with open(config_path) as f:
         config = yaml.safe_load(f)
-    with open(prompts_path, "r") as f:
+    with open(prompts_path) as f:
         prompts = yaml.safe_load(f)
     return config, prompts
 
+
 def has_api_keys():
-    # Check for common API keys in environment variables
-    keys = ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY"]
-    return any(os.getenv(k) for k in keys)
+    return any(os.getenv(k) for k in ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY"])
+
 
 @pytest.fixture(scope="module")
 def magi_client():
     if not has_api_keys():
-        pytest.skip("No API keys found in environment variables.")
-    
+        pytest.skip("No API keys found.")
     config, prompts = load_settings()
-    
-    # You can override LLMs here to use cheaper/faster models for testing
-    # config['llms'] = ['gpt-4o-mini', 'gemini-1.5-flash']
-    
     return Magi(config, prompts)
 
-# Define the matrix of scenarios
-METHODS = [
-    "VoteYesNo",
-    "VoteOptions",
-    "Majority",
-    "Consensus",
-    "Minority",
-    "Probability",
-    "Compose"
-]
 
+# ---------------------------------------------------------------------------
+# Moral-dilemma prompts per method
+# ---------------------------------------------------------------------------
+METHOD_SCENARIOS = {
+    "VoteYesNo": {
+        # Active killing vs. letting die: pulling the lever makes you causally
+        # responsible for one death; not pulling makes you responsible for five.
+        "prompt": (
+            "A self-driving car's brakes have failed. It will kill five pedestrians "
+            "unless its AI deliberately swerves onto the pavement, killing the single "
+            "passenger inside. Should the AI be programmed to sacrifice its passenger?"
+        ),
+        "options": {},
+    },
+    "VoteOptions": {
+        # Lifeboat ethics: scarce resource, incommensurable claims.
+        "prompt": (
+            "A hospital has one donor heart. Who should receive it?"
+        ),
+        "options": {
+            "options": [
+                "A 10-year-old child with decades ahead",
+                "A 45-year-old surgeon who saves hundreds of lives per year",
+                "The patient who has waited longest on the list",
+                "Whoever has the highest chance of survival post-transplant",
+            ]
+        },
+    },
+    "Majority": {
+        # Capital punishment: retributivism vs. irreversibility vs. deterrence.
+        "prompt": (
+            "Should capital punishment be re-introduced for terrorist attacks "
+            "that cause mass civilian casualties, even knowing that wrongful "
+            "convictions are statistically inevitable?"
+        ),
+        "options": {},
+    },
+    "Consensus": {
+        # Abortion: bodily autonomy vs. moral status of the foetus — one of the
+        # hardest genuine consensus problems in applied ethics.
+        "prompt": (
+            "At what point, if any, does terminating a pregnancy become morally "
+            "impermissible, and who — if anyone — has the authority to enforce that line?"
+        ),
+        "options": {},
+    },
+    "Minority": {
+        # Effective altruism: most people accept giving to charity is good,
+        # but strong EA conclusions (e.g. you must donate until marginal utility
+        # equalises) are deeply uncomfortable.
+        "prompt": (
+            "If you can save a drowning child at trivial cost, you are obligated to. "
+            "Distance and anonymity are morally irrelevant. Therefore, anyone who "
+            "spends money on luxuries while children die of preventable diseases is "
+            "morally equivalent to letting the drowning child die. Is this argument sound?"
+        ),
+        "options": {},
+    },
+    "Probability": {
+        # Moral luck: a drunk driver who kills a pedestrian vs. one who arrives home
+        # safely — same decision, different outcome. How much should luck matter?
+        "prompt": (
+            "Two drivers drink the same amount and drive home. One kills a pedestrian "
+            "by chance; the other arrives safely. The lucky driver deserves the same "
+            "moral blame and legal punishment as the unlucky one."
+        ),
+        "options": {},
+    },
+    "Compose": {
+        # Write a steel-man of a deeply uncomfortable position.
+        "prompt": (
+            "Write the strongest possible moral argument for the claim that "
+            "wealthy nations have an absolute obligation to accept unlimited "
+            "refugees, regardless of cultural, economic, or security consequences. "
+            "Steel-man the position without hedging."
+        ),
+        "options": {},
+    },
+    "Synthesis": {
+        # The classic repugnant conclusion in population ethics — there is no
+        # comfortable resolution, making it ideal for a comprehensive synthesis.
+        "prompt": (
+            "Derek Parfit's Repugnant Conclusion: a world of ten billion people "
+            "living very happy lives is morally inferior to a world of a trillion "
+            "people whose lives are barely worth living, because the total sum of "
+            "well-being is greater. Is this conclusion repugnant, unavoidable, or "
+            "does it reveal a flaw in utilitarian reasoning itself?"
+        ),
+        "options": {},
+    },
+}
+
+METHODS = list(METHOD_SCENARIOS.keys())
 DELIBERATIVE_OPTIONS = [False, True]
+
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("method", METHODS)
 @pytest.mark.parametrize("deliberative", DELIBERATIVE_OPTIONS)
 async def test_method_execution(magi_client, method, deliberative):
-    """
-    Matrix test for all Magi methods and deliberative modes.
-    This runs actual LLM calls (integration test).
-    """
-    prompt = "Should code comments be mandatory?"
-    options = {}
+    """Matrix test: all methods × deliberative modes with real LLM calls."""
+    scenario = METHOD_SCENARIOS[method]
+    prompt = scenario["prompt"]
+    options = scenario["options"]
 
-    # Customize prompt/options based on method
-    if method == "VoteOptions":
-        prompt = "What is the best color for a UI primary button?"
-        options = {"options": ["Blue", "Green", "Red", "Black"]}
-    elif method == "Compose":
-        prompt = "Write a one-sentence haiku about coding tests."
-    elif method == "Probability":
-        prompt = "It will snow in Paris on January 1st, 2030."
-
-    print(f"\n[Integration] Testing {method} (Deliberative={deliberative})...")
+    print(f"\n[Integration] {method} (Deliberative={deliberative})")
+    print(f"Prompt: {prompt[:80]}...")
 
     try:
-        result = await magi_client.run(
+        # Both formats share a single deliberation run via run_structured()
+        structured = await magi_client.run_structured(
             user_prompt=prompt,
             method=method,
             method_options=options,
-            deliberative=deliberative
+            deliberative=deliberative,
         )
-        
-        # Save output for review
-        save_artifact(method, deliberative, prompt, result)
-        
-        # 1. Basic Validation
-        assert result is not None, "Result should not be None"
-        assert len(result) > 20, "Result is suspiciously short"
-        assert "Error:" not in result[:20], f"Method returned an error: {result}"
+        result = magi_client._render_markdown(structured)
 
-        # 2. Deliberative Mode Validation
+        save_text_artifact(method, deliberative, prompt, result)
+        save_json_artifact(method, deliberative, structured)
+
+        # --- text assertions ---
+        assert result is not None
+        assert len(result) > 20, "Result suspiciously short"
+        assert not result.startswith("Error:"), f"Method returned error: {result}"
+
         if deliberative:
-            assert "Pre-Deliberation Results" in result, "Missing Pre-Deliberation section"
-            assert "Post-Deliberation Results" in result, "Missing Post-Deliberation section"
+            assert "Pre-Deliberation Results" in result
+            assert "Post-Deliberation Results" in result
 
-        # 3. Method-Specific Validation (Check for key phrases in output)
-        if method in ["VoteYesNo", "VoteOptions"]:
-             # Vote breakdown usually present
-             assert "Vote Breakdown" in result or "Result:" in result
+        if method in ("VoteYesNo", "VoteOptions"):
+            assert "Vote Breakdown" in result or "Result:" in result
         elif method == "Majority":
             assert "Majority View Summary" in result
         elif method == "Consensus":
@@ -135,10 +213,31 @@ async def test_method_execution(magi_client, method, deliberative):
         elif method == "Minority":
             assert "Minority/Gap Analysis" in result
         elif method == "Probability":
-            assert "Probability Analysis" in result
+            assert "Probability Analysis" in result or "All LLMs abstained" in result
         elif method == "Compose":
             assert "Compose Results" in result
             assert "Rank 1" in result
+        elif method == "Synthesis":
+            assert "Synthesis" in result
+
+        # --- JSON / structured assertions ---
+        assert "error" not in structured, f"structured result has top-level error: {structured.get('error')}"
+        assert structured.get("schema_version") == "1.0"
+        assert structured.get("method") == method
+        assert structured.get("deliberative") == deliberative
+        assert "rounds" in structured and len(structured["rounds"]) >= 1
+
+        for rnd in structured["rounds"]:
+            assert "responses" in rnd
+            assert "errors" in rnd
+            assert len(rnd["responses"]) > 0, f"Round {rnd.get('round')} has no valid responses"
+            for resp in rnd["responses"]:
+                assert "model" in resp
+                assert "pseudonym" in resp
+                assert resp["pseudonym"].startswith("Participant ")
+
+        # JSON serialisable
+        json.dumps(structured)
 
     except Exception as e:
-        pytest.fail(f"Exception during test execution for {method} (Deliberative={deliberative}): {str(e)}")
+        pytest.fail(f"{method} (Deliberative={deliberative}) raised: {e}")

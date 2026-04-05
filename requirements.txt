@@ -1,6 +1,10 @@
-litellm
-pyyaml
-python-dotenv
-termcolor
-pytest
-pytest-asyncio
+# Runtime dependencies
+# litellm <1.44.12 is affected by CVE-2024-8938 (arbitrary code execution via eval).
+# Pin to a safe release.
+litellm>=1.44.12
+pyyaml>=6.0.1
+python-dotenv>=1.0.0
+
+# Development / testing (not installed by pip install magi-core)
+pytest>=8.0.0
+pytest-asyncio>=0.23.0

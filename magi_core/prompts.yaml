@@ -52,6 +52,11 @@ methods:
       {abstain_instruction}
       Statement: {prompt}
 
+  Synthesis:
+    instruction: |
+      Please provide your view or answer to the following prompt:
+      {prompt}
+
   Compose:
     instruction: |
       Please generate a high-quality response to the following prompt. Ensure it is well-structured and complete.
@@ -120,3 +125,13 @@ rapporteur:
     result_line: 'The probability results were: {result}.'
     response_type: 'analyses'
     instruction: 'Please summarise the analysis and reasons provided by the group, explaining the divergence in probability levels if any.'
+
+  Synthesis:
+    context: 'The group has provided their views on: "{prompt}".'
+    result_line: ''
+    response_type: 'views'
+    instruction: >
+      Please write a comprehensive synthesis that incorporates every perspective expressed by the participants.
+      Do not favour any single view or reduce the response to a majority opinion.
+      Instead, present a unified account that acknowledges agreements, disagreements, nuances, and the full
+      range of arguments offered. The synthesis should read as a coherent whole, not a list of bullet points.

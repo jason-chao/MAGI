@@ -1,7 +1,6 @@
 import yaml
 import os
 import random
-import string
 from typing import Dict, Any
 
 def load_yaml(file_path: str) -> Dict[str, Any]:
@@ -12,24 +11,29 @@ def get_default_prompts_path() -> str:
     """Returns the absolute path to the default prompts.yaml file bundled with the package."""
     return os.path.join(os.path.dirname(__file__), 'prompts.yaml')
 
+# Unambiguous alphanumeric characters (O, 0, I, 1 excluded to avoid visual confusion).
+_ID_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+_ID_LENGTH = 4
+
+
+def _random_id() -> str:
+    return "".join(random.choices(_ID_CHARS, k=_ID_LENGTH))
+
+
 def generate_pseudonyms(names: list[str]) -> Dict[str, str]:
     """
-    Generate random pseudonyms for a list of names.
-    Returns a dictionary mapping original names to pseudonyms.
+    Assign each model name a unique random ID label, e.g. 'Participant X7K2'.
+    IDs use unambiguous alphanumeric characters so they carry no ordering or connotation.
+    Returns a dict mapping each original name to its label.
     """
-    adjectives = ["Happy", "Brave", "Calm", "Wise", "Swift", "Eager", "Bright", "Gentle"]
-    nouns = ["Lion", "Eagle", "Dolphin", "Owl", "Tiger", "Fox", "Bear", "Wolf"]
-    
-    mapping = {}
-    used_pseudos = set()
-    
+    used: set[str] = set()
+    mapping: Dict[str, str] = {}
     for name in names:
-        while True:
-            pseudo = f"{random.choice(adjectives)} {random.choice(nouns)}"
-            if pseudo not in used_pseudos:
-                mapping[name] = pseudo
-                used_pseudos.add(pseudo)
-                break
+        pid = _random_id()
+        while pid in used:
+            pid = _random_id()
+        used.add(pid)
+        mapping[name] = f"Participant {pid}"
     return mapping
 
 def resolve_tie(items: list[Any]) -> Any:
