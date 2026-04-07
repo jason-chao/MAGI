@@ -903,5 +903,124 @@ class TestMagi(unittest.TestCase):
             self.fail(f"run_structured() result is not JSON serialisable: {e}")
 
 
+    # ------------------------------------------------------------------
+    # Per-call API key passing
+    # ------------------------------------------------------------------
+    @patch('magi_core.core.litellm.acompletion')
+    def test_api_key_forwarded_to_acompletion(self, mock_acompletion):
+        """api_keys={'openai': 'sk-test'} is forwarded as api_key= to every acompletion call."""
+        config = {'llms': ['openai/gpt-4o'], 'defaults': {'max_retries': 0, 'min_models': 1}}
+        magi = Magi(config, MOCK_PROMPTS)
+
+        async def side_effect(*args, **kwargs):
+            content = kwargs.get('messages', [{}])[-1].get('content', '')
+            if "Vote" in content:
+                return self.create_mock_completion('{"response": "yes", "reason": "R", "confidence_score": 0.9}')
+            return self.create_mock_completion("Summary")
+
+        mock_acompletion.side_effect = side_effect
+        with patch('magi_core.core.litellm.get_llm_provider'), \
+             patch('magi_core.core.litellm.validate_environment', return_value={'keys_in_environment': True}):
+            asyncio.run(magi.run(TROLLEY_PROBLEM, method="VoteYesNo", api_keys={"openai": "sk-test"}))
+
+        for c in mock_acompletion.call_args_list:
+            self.assertEqual(c[1].get('api_key'), 'sk-test',
+                             "Every acompletion call should have api_key='sk-test'")
+
+    @patch('magi_core.core.litellm.acompletion')
+    def test_api_key_not_sent_when_omitted(self, mock_acompletion):
+        """Without api_keys, no api_key kwarg is passed to acompletion."""
+        async def side_effect(*args, **kwargs):
+            content = kwargs.get('messages', [{}])[-1].get('content', '')
+            if "Vote" in content:
+                return self.create_mock_completion('{"response": "yes", "reason": "R", "confidence_score": 0.9}')
+            return self.create_mock_completion("Summary")
+
+        mock_acompletion.side_effect = side_effect
+        asyncio.run(self.magi.run(TROLLEY_PROBLEM, method="VoteYesNo"))
+
+        for c in mock_acompletion.call_args_list:
+            self.assertNotIn('api_key', c[1],
+                             "api_key should not appear in acompletion kwargs when omitted")
+
+    @patch('magi_core.core.litellm.acompletion')
+    def test_api_key_provider_mismatch_falls_back(self, mock_acompletion):
+        """api_keys for a different provider does not inject api_key for the model's calls."""
+        config = {'llms': ['openai/gpt-4o'], 'defaults': {'max_retries': 0, 'min_models': 1}}
+        magi = Magi(config, MOCK_PROMPTS)
+
+        async def side_effect(*args, **kwargs):
+            content = kwargs.get('messages', [{}])[-1].get('content', '')
+            if "Vote" in content:
+                return self.create_mock_completion('{"response": "yes", "reason": "R", "confidence_score": 0.9}')
+            return self.create_mock_completion("Summary")
+
+        mock_acompletion.side_effect = side_effect
+        with patch('magi_core.core.litellm.get_llm_provider'), \
+             patch('magi_core.core.litellm.validate_environment', return_value={'keys_in_environment': True}):
+            asyncio.run(magi.run(TROLLEY_PROBLEM, method="VoteYesNo", api_keys={"anthropic": "sk-ant-xxx"}))
+
+        for c in mock_acompletion.call_args_list:
+            self.assertNotIn('api_key', c[1],
+                             "api_key should not be passed when provider doesn't match")
+
+    @patch('magi_core.core.litellm.acompletion')
+    def test_api_key_multiple_providers(self, mock_acompletion):
+        """Each model gets the correct provider-specific API key."""
+        config = {'llms': ['openai/gpt-4o', 'anthropic/claude-3'], 'defaults': {'max_retries': 0, 'min_models': 1}}
+        magi = Magi(config, MOCK_PROMPTS)
+        keys = {"openai": "sk-openai", "anthropic": "sk-anthropic"}
+
+        async def side_effect(*args, **kwargs):
+            content = kwargs.get('messages', [{}])[-1].get('content', '')
+            if "Vote" in content:
+                return self.create_mock_completion('{"response": "yes", "reason": "R", "confidence_score": 0.9}')
+            return self.create_mock_completion("Summary")
+
+        mock_acompletion.side_effect = side_effect
+        with patch('magi_core.core.litellm.get_llm_provider'), \
+             patch('magi_core.core.litellm.validate_environment', return_value={'keys_in_environment': True}):
+            asyncio.run(magi.run(TROLLEY_PROBLEM, method="VoteYesNo", api_keys=keys))
+
+        for c in mock_acompletion.call_args_list:
+            model = c[1].get('model', '')
+            if model.startswith('openai/'):
+                self.assertEqual(c[1].get('api_key'), 'sk-openai')
+            elif model.startswith('anthropic/'):
+                self.assertEqual(c[1].get('api_key'), 'sk-anthropic')
+
+    @patch('magi_core.core.litellm.acompletion')
+    def test_check_models_with_api_keys(self, mock_acompletion):
+        """check_models() forwards api_keys to _ping_model's acompletion call."""
+        config = {'llms': ['openai/gpt-4o'], 'defaults': {}}
+        magi = Magi(config, MOCK_PROMPTS)
+
+        mock_acompletion.return_value = self.create_mock_completion("OK")
+
+        asyncio.run(magi.check_models(api_keys={"openai": "sk-check"}))
+
+        for c in mock_acompletion.call_args_list:
+            self.assertEqual(c[1].get('api_key'), 'sk-check')
+
+    @patch('magi_core.core.litellm.acompletion')
+    def test_validate_model_skipped_when_api_key_provided(self, mock_acompletion):
+        """When api_keys covers the model's provider, validate_environment is not called."""
+        config = {'llms': ['openai/gpt-4o'], 'defaults': {'max_retries': 0, 'min_models': 1}}
+        magi = Magi(config, MOCK_PROMPTS)
+
+        async def side_effect(*args, **kwargs):
+            content = kwargs.get('messages', [{}])[-1].get('content', '')
+            if "Vote" in content:
+                return self.create_mock_completion('{"response": "yes", "reason": "R", "confidence_score": 0.9}')
+            return self.create_mock_completion("Summary")
+
+        mock_acompletion.side_effect = side_effect
+        with patch('magi_core.core.litellm.get_llm_provider') as mock_provider, \
+             patch('magi_core.core.litellm.validate_environment') as mock_validate:
+            asyncio.run(magi.run(TROLLEY_PROBLEM, method="VoteYesNo", api_keys={"openai": "sk-test"}))
+
+        mock_validate.assert_not_called()
+
+
 if __name__ == '__main__':
     unittest.main()

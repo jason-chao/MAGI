@@ -77,8 +77,17 @@ class Magi:
         self.max_retries = defaults.get('max_retries', 3)
         self.request_timeout: float = float(defaults.get('request_timeout', 60))
 
+        self._api_keys: Optional[Dict[str, str]] = None
+
         if self.config.get('litellm_debug_mode', False):
             litellm._turn_on_debug()
+
+    def _resolve_api_key(self, model_name: str) -> Optional[str]:
+        """Return the per-call API key for a model, or None to use env vars."""
+        if not self._api_keys:
+            return None
+        provider = model_name.split("/")[0] if "/" in model_name else None
+        return self._api_keys.get(provider) if provider else None
 
     @staticmethod
     def _validate_config(config: Dict[str, Any]) -> None:
@@ -141,6 +150,9 @@ class Magi:
         """Validates that a model is configured and its API key is present."""
         try:
             litellm.get_llm_provider(model_name)
+            # Skip env-var check when a per-call API key covers this model's provider
+            if self._resolve_api_key(model_name):
+                return
             res = litellm.validate_environment(model_name)
             if not res.get('keys_in_environment'):
                 missing = res.get('missing_keys', [])
@@ -192,11 +204,16 @@ class Magi:
                 if retries > 0:
                     messages.append({"role": "user", "content": "Previous response was not valid JSON. Please ensure the response is a valid JSON object without markdown formatting."})
 
+                extra_kwargs = {}
+                api_key = self._resolve_api_key(model_name)
+                if api_key:
+                    extra_kwargs["api_key"] = api_key
                 response = await litellm.acompletion(
                     model=model_name,
                     messages=messages,
                     response_format={"type": "json_object"},
                     timeout=self.request_timeout,
+                    **extra_kwargs,
                 )
 
                 content = response.choices[0].message.content
@@ -257,7 +274,11 @@ class Magi:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
             ]
-            response = await litellm.acompletion(model=model_name, messages=messages, timeout=self.request_timeout)
+            extra_kwargs = {}
+            api_key = self._resolve_api_key(model_name)
+            if api_key:
+                extra_kwargs["api_key"] = api_key
+            response = await litellm.acompletion(model=model_name, messages=messages, timeout=self.request_timeout, **extra_kwargs)
             return response.choices[0].message.content
         except Exception as e:
             _, short_msg = _classify_error(e)
@@ -267,11 +288,16 @@ class Magi:
     async def _ping_model(self, model_name: str) -> Tuple[bool, str, str]:
         """Make a minimal API call to verify a model is reachable and returns content."""
         try:
+            extra_kwargs = {}
+            api_key = self._resolve_api_key(model_name)
+            if api_key:
+                extra_kwargs["api_key"] = api_key
             r = await litellm.acompletion(
                 model=model_name,
                 messages=[{"role": "user", "content": "Reply with the word OK and nothing else."}],
                 max_tokens=500,  # Generous limit — thinking models reserve tokens internally
                 timeout=self.request_timeout,
+                **extra_kwargs,
             )
             content = r.choices[0].message.content
             if content:
@@ -281,11 +307,12 @@ class Magi:
             category, short_msg = _classify_error(e)
             return False, category, short_msg
 
-    async def check_models(self, models: Optional[List[Slot]] = None) -> List[Dict[str, Any]]:
+    async def check_models(self, models: Optional[List[Slot]] = None, api_keys: Optional[Dict[str, str]] = None) -> List[Dict[str, Any]]:
         """
         Probe each configured slot with a real API call and return availability results.
         Each entry in the returned list covers one slot (primary + any fallbacks).
         """
+        self._api_keys = api_keys
         if models is None:
             models = self.llms
 
@@ -752,11 +779,13 @@ class Magi:
         method: str,
         method_options: Optional[Dict[str, Any]],
         deliberative: bool,
+        api_keys: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
         """
         Core deliberation engine. Returns a structured, JSON-serialisable result dict.
         On validation or quorum failures, returns a dict with a top-level 'error' key.
         """
+        self._api_keys = api_keys
         if not user_prompt or not user_prompt.strip():
             return {"error": "user_prompt must not be empty."}
 
@@ -861,10 +890,11 @@ class Magi:
         method: str = 'VoteYesNo',
         method_options: Dict[str, Any] = None,
         deliberative: bool = False,
+        api_keys: Optional[Dict[str, str]] = None,
     ) -> str:
         """Run deliberation and return a Markdown-formatted report string."""
         result = await self._deliberate(
-            user_prompt, system_prompt, selected_llms, method, method_options, deliberative
+            user_prompt, system_prompt, selected_llms, method, method_options, deliberative, api_keys=api_keys
         )
         return self._render_markdown(result)
 
@@ -876,8 +906,9 @@ class Magi:
         method: str = 'VoteYesNo',
         method_options: Dict[str, Any] = None,
         deliberative: bool = False,
+        api_keys: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
         """Run deliberation and return a structured, JSON-serialisable result dict."""
         return await self._deliberate(
-            user_prompt, system_prompt, selected_llms, method, method_options, deliberative
+            user_prompt, system_prompt, selected_llms, method, method_options, deliberative, api_keys=api_keys
         )

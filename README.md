@@ -414,7 +414,7 @@ When deliberation cannot proceed (empty prompt, no models, quorum failure), `run
 
 ## Package API
 
-No `config.yaml` file needed — pass models as a dict. API keys must be set as environment variables (or loaded via `load_dotenv()`) before calling `run()` or `run_structured()`.
+No `config.yaml` file needed — pass models as a dict. API keys can be set as environment variables (or loaded via `load_dotenv()`), or passed per-call via the `api_keys` parameter for multi-tenant services.
 
 ```python
 import asyncio
@@ -481,6 +481,7 @@ Both methods accept identical parameters:
 | `method` | `str` | `"VoteYesNo"` | One of the eight methods listed above |
 | `method_options` | `dict` | `{}` | Method-specific options (see below) |
 | `deliberative` | `bool` | `False` | Enable a second round where agents review peer responses |
+| `api_keys` | `dict[str, str] \| None` | `None` | Per-call API keys keyed by provider (e.g. `{"openai": "sk-...", "anthropic": "sk-ant-..."}`) — overrides env vars |
 
 **`method_options` keys:**
 
@@ -526,6 +527,16 @@ await magi.run(
 # Structured output for downstream use
 result = await magi.run_structured("Should you pull the lever?", method="VoteYesNo")
 winner = result["rounds"][0]["aggregate"]["winner"]
+
+# Per-call API keys — each user passes their own keys (ideal for multi-tenant services)
+result = await magi.run_structured(
+    "Should we proceed with the merger?",
+    method="VoteYesNo",
+    api_keys={
+        "openai": user_openai_key,
+        "anthropic": user_anthropic_key,
+    },
+)
 ```
 
 ## Architecture
