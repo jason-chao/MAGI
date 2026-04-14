@@ -21,6 +21,67 @@ def _primary(slot: Slot) -> str:
     return slot if isinstance(slot, str) else slot[0]
 
 
+def _match_pseudonym(cand_key: str, pseudonyms: List[str]) -> Optional[str]:
+    """Resolve a reviewer-returned JSON key to one of the known pseudonyms.
+
+    Matches case-insensitively on the full pseudonym first, then on the bare ID
+    token (e.g. "X7K2") as a standalone alphanumeric run — so keys like
+    "Candidate_X7K2" or "participant x7k2" still resolve.
+    """
+    if not isinstance(cand_key, str) or not cand_key:
+        return None
+    low = cand_key.lower()
+    for p in pseudonyms:
+        if p.lower() in low:
+            return p
+    for p in pseudonyms:
+        parts = p.rsplit(" ", 1)
+        if len(parts) != 2:
+            continue
+        pid = parts[1]
+        if re.search(r"(?<![A-Za-z0-9])" + re.escape(pid) + r"(?![A-Za-z0-9])",
+                     cand_key, re.IGNORECASE):
+            return p
+    return None
+
+
+def _pair_ratings_with_pseudonyms(
+    ratings: Any, pseudonyms_in_order: List[str]
+) -> Tuple[List[Tuple[Optional[str], Any, str]], bool]:
+    """Pair each rating entry with a pseudonym.
+
+    Returns (pairs, positional) where pairs is a list of
+    (pseudonym_or_None, rating_data, raw_key) and `positional` is True when
+    attribution fell back to candidate ordering.
+
+    Resolution order:
+      * list response: attribute by index against `pseudonyms_in_order`.
+      * dict response: match each key via `_match_pseudonym`; if *every* key
+        fails to match and the arity equals len(pseudonyms_in_order), fall
+        back to insertion-order attribution and flag as positional.
+    """
+    if isinstance(ratings, list):
+        pairs: List[Tuple[Optional[str], Any, str]] = []
+        for i, rd in enumerate(ratings):
+            pseudo = pseudonyms_in_order[i] if i < len(pseudonyms_in_order) else None
+            pairs.append((pseudo, rd, f"[{i}]"))
+        return pairs, True
+    if not isinstance(ratings, dict):
+        return [], False
+    items = list(ratings.items())
+    resolved: List[Tuple[Optional[str], Any, str]] = [
+        (_match_pseudonym(k, pseudonyms_in_order), v, str(k)) for k, v in items
+    ]
+    if (items
+            and len(items) == len(pseudonyms_in_order)
+            and all(r[0] is None for r in resolved)):
+        return (
+            [(pseudonyms_in_order[i], v, str(k)) for i, (k, v) in enumerate(items)],
+            True,
+        )
+    return resolved, False
+
+
 def _classify_error(exc: Exception) -> Tuple[str, str]:
     """
     Return (category, short_message) for an LLM exception.
@@ -572,6 +633,8 @@ class Magi:
 
             scores_map: Dict[str, List[float]] = {pseudo: [] for pseudo in candidate_map}
             reviews_map: Dict[str, List[Dict]] = {pseudo: [] for pseudo in candidate_map}
+            pseudonyms_in_order = [mapping[r["model"]] for r in valid_results]
+            unattributed_reviewers: List[Dict[str, Any]] = []
 
             for res in rating_results:
                 if isinstance(res, BaseException):
@@ -580,19 +643,32 @@ class Magi:
                 if "error" in res:
                     continue
                 ratings = res.get("response")
-                if isinstance(ratings, dict):
-                    for cand_key, rating_data in ratings.items():
-                        target_pseudo = next((p for p in candidate_map if p in cand_key), None)
-                        if target_pseudo:
-                            try:
-                                val = float(rating_data.get("score", 0))
-                                just = rating_data.get("justification", "")
-                                scores_map[target_pseudo].append(val)
-                                reviews_map[target_pseudo].append(
-                                    {"reviewer_model": res["model"], "score": val, "justification": just}
-                                )
-                            except (ValueError, TypeError):
-                                pass
+                pairs, positional = _pair_ratings_with_pseudonyms(ratings, pseudonyms_in_order)
+                reviewer_unattributed_keys: List[str] = []
+                for pseudo, rating_data, raw_key in pairs:
+                    if pseudo is None:
+                        reviewer_unattributed_keys.append(raw_key)
+                        continue
+                    if not isinstance(rating_data, dict):
+                        continue
+                    try:
+                        val = float(rating_data.get("score", 0))
+                    except (ValueError, TypeError):
+                        continue
+                    just = rating_data.get("justification", "")
+                    scores_map[pseudo].append(val)
+                    review = {"reviewer_model": res["model"], "score": val, "justification": just}
+                    if positional:
+                        review["attribution"] = "positional"
+                    reviews_map[pseudo].append(review)
+                if reviewer_unattributed_keys:
+                    logger.warning(
+                        "Compose: reviewer %s returned unattributable keys: %s",
+                        res.get("model"), reviewer_unattributed_keys,
+                    )
+                    unattributed_reviewers.append(
+                        {"reviewer_model": res.get("model"), "raw_keys": reviewer_unattributed_keys}
+                    )
 
             ranked = sorted(
                 [
@@ -614,11 +690,14 @@ class Magi:
             for i, item in enumerate(ranked, 1):
                 item["rank"] = i
 
+            aggregate_compose: Dict[str, Any] = {"ranked_candidates": ranked}
+            if unattributed_reviewers:
+                aggregate_compose["unattributed_reviewers"] = unattributed_reviewers
             return {
                 "round": round_num,
                 "responses": responses,
                 "errors": error_results,
-                "aggregate": {"ranked_candidates": ranked},
+                "aggregate": aggregate_compose,
                 "rapporteur": None,
             }
 
@@ -716,6 +795,13 @@ class Magi:
                     *peer_lines,
                     "=" * 40,
                 ]
+            unattr = aggregate.get("unattributed_reviewers") or []
+            if unattr:
+                lines.append(
+                    f"\nNote: {len(unattr)} reviewer(s) returned ratings whose keys "
+                    "could not be attributed to a candidate and were excluded: "
+                    + ", ".join(u.get("reviewer_model", "?") for u in unattr)
+                )
             text = "\n".join(lines)
 
         elif method == "Majority":

@@ -331,6 +331,106 @@ class TestMagi(unittest.TestCase):
         self.assertIn("Average Score: 8.00", result)
 
     # ------------------------------------------------------------------
+    # Compose — peer-rating attribution robustness
+    # ------------------------------------------------------------------
+    def _compose_attribution_side_effect(self, key_transform):
+        """Build a litellm side-effect for Compose where reviewers transform
+        each candidate's pseudonym into the JSON key via `key_transform(pseudo)`.
+        """
+        import re
+
+        def side_effect(*args, **kwargs):
+            content = kwargs.get('messages', [{}])[-1].get('content', '')
+            if "Compose" in content:
+                return self.create_mock_completion(
+                    '{"response": "draft", "reason": "R", "confidence_score": 1.0}'
+                )
+            if "Rate" in content:
+                pseudos = re.findall(r"--- Candidate (Participant [A-Z0-9]+) ---", content)
+                ratings = key_transform(pseudos)
+                return self.create_mock_completion(json.dumps({
+                    "response": ratings, "reason": "ok", "confidence_score": 1.0,
+                }))
+            return self.create_mock_completion('{}')
+        return side_effect
+
+    def _run_compose_structured(self):
+        return asyncio.run(self.magi.run_structured(
+            "prompt text", method="Compose",
+        ))
+
+    @patch('magi_core.core.litellm.acompletion')
+    def test_compose_attribution_id_only_keys(self, mock_acompletion):
+        """Reviewer returns bare 4-char IDs as keys; all candidates still get scored."""
+        def xform(pseudos):
+            return {p.split()[1]: {"score": 7.0, "justification": "j"} for p in pseudos}
+        mock_acompletion.side_effect = self._compose_attribution_side_effect(xform)
+        result = self._run_compose_structured()
+        ranked = result["rounds"][0]["aggregate"]["ranked_candidates"]
+        for item in ranked:
+            self.assertEqual(item["average_score"], 7.0)
+            self.assertEqual(len(item["peer_reviews"]), 2)
+
+    @patch('magi_core.core.litellm.acompletion')
+    def test_compose_attribution_prefixed_keys(self, mock_acompletion):
+        """Case/punctuation-varied keys (e.g. 'candidate_participant_x7k2') resolve."""
+        def xform(pseudos):
+            out = {}
+            for i, p in enumerate(pseudos):
+                pid = p.split()[1]
+                key = f"candidate_participant_{pid.lower()}" if i % 2 == 0 else f"Candidate-{pid}"
+                out[key] = {"score": 8.0, "justification": "j"}
+            return out
+        mock_acompletion.side_effect = self._compose_attribution_side_effect(xform)
+        result = self._run_compose_structured()
+        ranked = result["rounds"][0]["aggregate"]["ranked_candidates"]
+        for item in ranked:
+            self.assertEqual(item["average_score"], 8.0)
+            self.assertEqual(len(item["peer_reviews"]), 2)
+
+    @patch('magi_core.core.litellm.acompletion')
+    def test_compose_attribution_list_response(self, mock_acompletion):
+        """Reviewer returns a JSON list in candidate order; positional attribution applies."""
+        def xform(pseudos):
+            return [{"score": 6.0 + i, "justification": "j"} for i, _ in enumerate(pseudos)]
+        mock_acompletion.side_effect = self._compose_attribution_side_effect(xform)
+        result = self._run_compose_structured()
+        ranked = result["rounds"][0]["aggregate"]["ranked_candidates"]
+        for item in ranked:
+            self.assertTrue(item["peer_reviews"], "expected positional reviews")
+            for pr in item["peer_reviews"]:
+                self.assertEqual(pr.get("attribution"), "positional")
+
+    @patch('magi_core.core.litellm.acompletion')
+    def test_compose_attribution_total_miss_falls_back_positionally(self, mock_acompletion):
+        """Dict with unidentifiable keys but matching arity falls back to positional order."""
+        def xform(pseudos):
+            return {f"Option {chr(ord('A') + i)}": {"score": 5.0, "justification": "j"}
+                    for i, _ in enumerate(pseudos)}
+        mock_acompletion.side_effect = self._compose_attribution_side_effect(xform)
+        result = self._run_compose_structured()
+        agg = result["rounds"][0]["aggregate"]
+        for item in agg["ranked_candidates"]:
+            self.assertEqual(item["average_score"], 5.0)
+            self.assertTrue(all(pr.get("attribution") == "positional"
+                                for pr in item["peer_reviews"]))
+        self.assertNotIn("unattributed_reviewers", agg)
+
+    @patch('magi_core.core.litellm.acompletion')
+    def test_compose_unattributed_surfaced_when_arity_mismatches(self, mock_acompletion):
+        """Unresolvable keys with mismatched arity are surfaced, not silently zeroed."""
+        def xform(pseudos):
+            return {"only_one_entry": {"score": 9.0, "justification": "j"}}
+        mock_acompletion.side_effect = self._compose_attribution_side_effect(xform)
+        result = self._run_compose_structured()
+        agg = result["rounds"][0]["aggregate"]
+        self.assertIn("unattributed_reviewers", agg)
+        self.assertEqual(len(agg["unattributed_reviewers"]), 2)
+        for item in agg["ranked_candidates"]:
+            self.assertEqual(item["average_score"], 0.0)
+            self.assertEqual(item["peer_reviews"], [])
+
+    # ------------------------------------------------------------------
     # Synthesis (new mode)
     # ------------------------------------------------------------------
     @patch('magi_core.core.litellm.acompletion')

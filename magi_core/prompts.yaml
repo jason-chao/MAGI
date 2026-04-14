@@ -59,7 +59,7 @@ methods:
 
   Compose:
     instruction: |
-      Please generate a high-quality response to the following prompt. Ensure it is well-structured and complete.
+      Write what the prompt asks for. Produce the finished piece directly — no outline, no meta-commentary. Put the complete composition in the "response" field.
       Prompt: {prompt}
     rating_instruction: |
       Please review the following candidate responses to the original prompt: "{prompt}".
@@ -70,9 +70,11 @@ methods:
       You must rate each candidate on a scale of 0 to 10 (10 being best).
       You must provide a justification for your rating.
 
-      Your output must be a JSON object with the following structure inside the "response" field:
+      Your output must be a JSON object inside the "response" field. Use each candidate's exact
+      pseudonym token (e.g. "Participant X7K2") as the JSON key — do not abbreviate, renumber,
+      translate, or rephrase it. Include one entry per candidate:
       {{
-        "Candidate <Name>": {{
+        "Participant <ID>": {{
           "score": <number>,
           "justification": "<string>"
         }},
