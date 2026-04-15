@@ -17,7 +17,7 @@ except ImportError:
     pass
 
 
-METHODS = ["VoteYesNo", "VoteOptions", "Majority", "Consensus", "Minority", "Probability", "Compose", "Synthesis"]
+METHODS = ["Synthesis", "Probability", "VoteYesNo", "VoteOptions", "Majority", "Consensus", "Minority", "Compose"]
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -27,14 +27,14 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Decision Modes:
+  Synthesis    Weave every view into one unified response
+  Probability  Estimate likelihood of a statement being true
   VoteYesNo    Democratic Yes/No/Abstain vote
   VoteOptions  Vote with custom options
   Majority     Summarise the prevailing opinion
   Consensus    Find common ground between views
   Minority     Surface dissenting and overlooked views
-  Probability  Estimate likelihood of a statement being true
   Compose      Generate content and rank via blind peer review
-  Synthesis    Comprehensively combine ALL perspectives into one unified response
 
 Examples:
   magi "Is it ever justified to lie to protect someone's feelings?" --method VoteYesNo
@@ -101,6 +101,11 @@ Examples:
         "--prompts",
         default=None,
         help="Path to prompts YAML file (default: bundled prompts.yaml)",
+    )
+    parser.add_argument(
+        "-L", "--language",
+        default=None,
+        help='Language for model responses (free text; e.g. "Japanese"). Defaults to English.',
     )
     return parser
 
@@ -212,11 +217,15 @@ def main():
         all_ok = _print_model_check(results)
         sys.exit(0 if all_ok else 1)
 
+    language = args.language or config.get("defaults", {}).get("language")
+
     print(f"Method : {args.method}")
     display_models = [s[0] if isinstance(s, list) else s for s in selected_llms]
     print(f"Models : {', '.join(display_models)}")
     if args.deliberative:
         print("Mode   : Deliberative")
+    if language:
+        print(f"Language: {language}")
     print("-" * 50)
 
     try:
@@ -229,6 +238,7 @@ def main():
                     method=args.method,
                     method_options=method_options,
                     deliberative=args.deliberative,
+                    language=language,
                 )
             )
             print(json.dumps(result, indent=2))
@@ -241,6 +251,7 @@ def main():
                     method=args.method,
                     method_options=method_options,
                     deliberative=args.deliberative,
+                    language=language,
                 )
             )
             print(result)

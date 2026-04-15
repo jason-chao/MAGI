@@ -22,34 +22,34 @@
 # Tips:
 #   • Use at least 3 models for meaningful deliberation.
 #   • Mixing providers reduces correlated failures.
-#   • Pair expensive flagship models with cheaper fallbacks.
+#   • List the lightest/newest model first; reserve flagships as fallbacks.
 # ---------------------------------------------------------------------------
 llms:
-  # Plain string — no fallback
-  - openai/gpt-4o
+  # Plain string — single lightweight model, no fallback
+  - openai/gpt-5.4-nano
 
-  # Two-model fallback chain — if gpt-4o-mini is unavailable, falls back to gpt-4o
-  - - openai/gpt-4o-mini
-    - openai/gpt-4o
+  # Lightweight → flagship fallback chain within one provider
+  - - anthropic/claude-haiku-4-5-20251001
+    - anthropic/claude-sonnet-4-6
+    - anthropic/claude-opus-4-6
 
-  # Three-model fallback chain across providers
-  - - anthropic/claude-sonnet-4-6
-    - anthropic/claude-haiku-4-5-20251001
-    - openai/gpt-4o-mini
+  # Cross-provider fallback chain — Gemini light, then OpenAI mini as backup
+  - - gemini/gemini-2.5-flash-lite
+    - gemini/gemini-2.5-flash
+    - openai/gpt-5.4-mini
 
   # Additional models to broaden the council (uncomment as needed):
+  # - openai/gpt-5.4
   # - anthropic/claude-opus-4-6
-  # - gemini/gemini-2.5-pro-preview-03-25
-  # - - gemini/gemini-2.5-flash
-  #   - openai/gpt-4o-mini
+  # - gemini/gemini-2.5-pro
 
 # ---------------------------------------------------------------------------
 # defaults — global settings applied when not overridden by CLI flags.
 # ---------------------------------------------------------------------------
 defaults:
   # Default aggregation method when --method is not specified.
-  # Choices: VoteYesNo, VoteOptions, Majority, Consensus, Minority,
-  #          Probability, Compose, Synthesis
+  # Choices: Synthesis, Probability, VoteYesNo, VoteOptions, Majority,
+  #          Consensus, Minority, Compose
   method: VoteYesNo
 
   # Fraction of votes required to declare a winner in VoteYesNo / VoteOptions.
@@ -71,6 +71,11 @@ defaults:
   # Seconds to wait for a single LLM API call before abandoning it.
   # Increase if you use large models or long prompts; decrease for faster feedback.
   request_timeout: 60
+
+  # Optional — mandate the language/culture in which models respond.
+  # Free text (e.g. "Japanese", "British English", "German").
+  # Defaults to English when unset. CLI --language overrides this value.
+  # language: Japanese
 
 # ---------------------------------------------------------------------------
 # litellm_debug_mode — set to true to print raw LiteLLM API traffic to stderr.

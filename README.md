@@ -14,16 +14,16 @@ MAGI sends a question to all configured models in parallel. Each model responds 
 
 | Mode | What it does |
 |------|-------------|
+| `Synthesis` | Weaves every view into one unified response |
+| `Probability` | Estimates the likelihood of a statement being true |
 | `VoteYesNo` | Democratic Yes / No / Abstain vote |
 | `VoteOptions` | Vote on a custom set of options |
 | `Majority` | Summarises the prevailing opinion |
 | `Consensus` | Finds common ground across all views |
 | `Minority` | Surfaces dissenting and overlooked perspectives |
-| `Probability` | Estimates the likelihood of a statement being true |
 | `Compose` | Generates content and ranks it via blind peer review |
-| `Synthesis` | Comprehensively combines **all** perspectives into one unified response |
 
-**Synthesis** is the most inclusive mode — unlike `Majority` (which amplifies the dominant view) or `Consensus` (which finds the lowest common denominator), `Synthesis` instructs the rapporteur to weave every argument, nuance, and disagreement into a single coherent narrative.
+**Synthesis** weaves every model's argument — agreements and disagreements alike — into one unified response. Use it when you want the full picture, not a winner.
 
 ## Decision Flows
 
@@ -72,7 +72,13 @@ The "Aggregate" step is what distinguishes each mode:
 ```
   Responses collected
          │
-         ├─ VoteYesNo / VoteOptions ──► tally votes ──► declare winner (if > threshold)
+         ├─ Synthesis ─────────────────────────────► highest-confidence model
+         │                                           weaves ALL views into one narrative
+         │
+         ├─ Probability ───────────────────────────► compute average / median score
+         │                                           median model writes analysis
+         │
+         ├─ VoteYesNo / VoteOptions ──────────────► tally votes ──► declare winner (if > threshold)
          │                                                       │
          │                                           rapporteur summarises vote
          │
@@ -85,17 +91,11 @@ The "Aggregate" step is what distinguishes each mode:
          ├─ Minority ──────────────────────────────► lowest-confidence model
          │                                           surfaces dissent and gaps
          │
-         ├─ Probability ───────────────────────────► compute average / median score
-         │                                           median model writes analysis
-         │
-         ├─ Compose ───────────────────────────────► generate texts (Round 1)
-         │                                                │
-         │                                           blind peer rating (Round 2)
-         │                                                │
-         │                                           ranked output, no rapporteur
-         │
-         └─ Synthesis ─────────────────────────────► highest-confidence model
-                                                     weaves ALL views into one narrative
+         └─ Compose ───────────────────────────────► generate texts (Round 1)
+                                                          │
+                                                     blind peer rating (Round 2)
+                                                          │
+                                                     ranked output, no rapporteur
 ```
 
 ### Deliberative mode (`--deliberative`)
@@ -176,9 +176,9 @@ load_dotenv()  # reads .env from the current directory
 
 ```yaml
 llms:
-  - openai/gpt-4.1
+  - openai/gpt-5.4-nano
   - anthropic/claude-haiku-4-5-20251001
-  - gemini/gemini-2.5-flash
+  - gemini/gemini-2.5-flash-lite
 
 defaults:
   max_retries: 2
@@ -186,12 +186,13 @@ defaults:
   request_timeout: 60 # seconds before an individual LLM call is abandoned
 ```
 
-Fallback chains are also supported — if the primary model fails, MAGI automatically tries the next:
+Fallback chains are also supported — list the lightest/newest model first; if it fails, MAGI automatically tries the next:
 
 ```yaml
 llms:
-  - - openai/gpt-4.1
-    - openai/gpt-4o          # fallback if gpt-4.1 is unavailable
+  - - openai/gpt-5.4-nano
+    - openai/gpt-5.4-mini       # fallback if gpt-5.4-nano is unavailable
+    - openai/gpt-4.1-mini       # secondary fallback
   - anthropic/claude-haiku-4-5-20251001
 ```
 
@@ -200,11 +201,19 @@ llms:
 ```python
 config = {
     "llms": [
-        "openai/gpt-4.1",
+        "openai/gpt-5.4-nano",
         "anthropic/claude-haiku-4-5-20251001",
-        "gemini/gemini-2.5-flash",
+        "gemini/gemini-2.5-flash-lite",
     ]
 }
+```
+
+### Language
+
+By default, the council responds in English. To deliberate in another language or cultural register, pass `--language` on the CLI (free text — e.g. `"Japanese"`, `"British English"`, `"German"`), set `defaults.language` in `config.yaml`, or pass `language="..."` to `magi.run()` / `magi.run_structured()`. Only the free-text fields (`reason`, `response`, `justification`, rapporteur summary) change language; JSON keys stay in English so downstream parsing is unaffected.
+
+```bash
+magi "What does a just society owe its migrants?" --method Synthesis --language "Japanese"
 ```
 
 ### `magi_core/prompts.yaml`
@@ -292,7 +301,7 @@ magi "Should you pull the lever?" --method VoteYesNo --output-format json | jq '
 | Argument | Description |
 |----------|-------------|
 | `prompt` | The question or issue to deliberate on |
-| `--method` | `VoteYesNo` (default), `VoteOptions`, `Majority`, `Consensus`, `Minority`, `Probability`, `Compose`, `Synthesis` |
+| `--method` | `VoteYesNo` (default), `Synthesis`, `Probability`, `VoteOptions`, `Majority`, `Consensus`, `Minority`, `Compose` |
 | `--llms` | Comma-separated model names (overrides `config.yaml`) |
 | `--options` | Custom options for `VoteOptions` |
 | `--vote-threshold` | Fraction of votes to declare a winner (default: `0.5`) |
@@ -300,6 +309,7 @@ magi "Should you pull the lever?" --method VoteYesNo --output-format json | jq '
 | `--deliberative` | Enable deliberative second round |
 | `--rapporteur-prompt` | Additional instructions for the rapporteur |
 | `--system-prompt` | Context prepended to every agent's system prompt |
+| `-L`, `--language` | Language for model responses (free text, e.g. `"Japanese"`). Defaults to English. |
 | `--output-format` | `text` (default) or `json` |
 | `--config` | Path to a custom `config.yaml` |
 | `--prompts` | Path to a custom `prompts.yaml` |
@@ -335,13 +345,13 @@ print(json.dumps(result, indent=2))
   "prompt": "Should you pull the lever?",
   "system_prompt": null,
   "deliberative": false,
-  "models": ["openai/gpt-4.1", "anthropic/claude-haiku-4-5-20251001"],
+  "models": ["openai/gpt-5.4-nano", "anthropic/claude-haiku-4-5-20251001"],
   "rounds": [
     {
       "round": 1,
       "responses": [
         {
-          "model": "openai/gpt-4.1",
+          "model": "openai/gpt-5.4-nano",
           "pseudonym": "Participant X7K2",
           "response": "yes",
           "reason": "Utilitarian reasoning: saving five outweighs saving one.",
@@ -351,15 +361,15 @@ print(json.dumps(result, indent=2))
       ],
       "errors": [
         {
-          "model": "gemini/gemini-2.5-flash",
+          "model": "gemini/gemini-1.5-pro",
           "error": "Model not found",
           "error_category": "not_found",
-          "attempted_fallbacks": ["gemini/gemini-2.5-flash", "gemini/gemini-1.5-pro"]
+          "attempted_fallbacks": ["gemini/gemini-1.5-pro", "gemini/gemini-1.0-pro"]
         }
       ],
       "aggregate": { },
       "rapporteur": {
-        "model": "openai/gpt-4.1",
+        "model": "openai/gpt-5.4-nano",
         "summary": "The council voted yes by a clear majority..."
       }
     }
@@ -382,7 +392,7 @@ print(json.dumps(result, indent=2))
 [
   {
     "rank": 1,
-    "model": "openai/gpt-4.1",
+    "model": "openai/gpt-5.4-nano",
     "pseudonym": "Participant X7K2",
     "average_score": 8.5,
     "text": "The composed paragraph text...",
@@ -405,7 +415,7 @@ When deliberation cannot proceed (empty prompt, no models, quorum failure), `run
 {
   "error": "Quorum not met — 1 of 3 model(s) responded (minimum required: 2).",
   "failed_models": [
-    { "model": "gemini/gemini-2.5-flash", "error_category": "not_found", "error": "Model not found" }
+    { "model": "gemini/gemini-1.5-pro", "error_category": "not_found", "error": "Model not found" }
   ]
 }
 ```
@@ -423,9 +433,9 @@ from magi_core.utils import load_yaml, get_default_prompts_path
 
 config = {
     "llms": [
-        "openai/gpt-4.1",
+        "openai/gpt-5.4-nano",
         "anthropic/claude-haiku-4-5-20251001",
-        "gemini/gemini-2.5-flash",
+        "gemini/gemini-2.5-flash-lite",
     ]
 }
 prompts = load_yaml(get_default_prompts_path())  # bundled prompts, no file needed
@@ -482,6 +492,7 @@ Both methods accept identical parameters:
 | `method_options` | `dict` | `{}` | Method-specific options (see below) |
 | `deliberative` | `bool` | `False` | Enable a second round where agents review peer responses |
 | `api_keys` | `dict[str, str] \| None` | `None` | Per-call API keys keyed by provider (e.g. `{"openai": "sk-...", "anthropic": "sk-ant-..."}`) — overrides env vars |
+| `language` | `str \| None` | `None` | Mandate response language/culture (free text, e.g. `"Japanese"`). `None` = English. |
 
 **`method_options` keys:**
 

@@ -331,6 +331,47 @@ class TestMagi(unittest.TestCase):
         self.assertIn("Average Score: 8.00", result)
 
     # ------------------------------------------------------------------
+    # Language directive
+    # ------------------------------------------------------------------
+    @patch('magi_core.core.litellm.acompletion')
+    def test_language_directive_injected_into_system_prompt(self, mock_acompletion):
+        """When `language` is set, every agent receives the directive in its system prompt."""
+        captured_system_prompts = []
+
+        async def side_effect(*args, **kwargs):
+            messages = kwargs.get('messages', [])
+            captured_system_prompts.append(messages[0]['content'])
+            return self.create_mock_completion(
+                '{"response": "yes", "reason": "R", "confidence_score": 0.9}'
+            )
+
+        mock_acompletion.side_effect = side_effect
+        asyncio.run(self.magi.run_structured(
+            TROLLEY_PROBLEM, method="VoteYesNo", language="German",
+        ))
+        agent_prompts = [p for p in captured_system_prompts if "System Base Prompt" in p]
+        self.assertTrue(agent_prompts, "expected at least one agent system prompt")
+        for p in agent_prompts:
+            self.assertIn("Respond in German.", p)
+
+    @patch('magi_core.core.litellm.acompletion')
+    def test_language_none_leaves_system_prompt_unchanged(self, mock_acompletion):
+        """Without `language`, no language directive appears in the system prompt."""
+        captured_system_prompts = []
+
+        async def side_effect(*args, **kwargs):
+            messages = kwargs.get('messages', [])
+            captured_system_prompts.append(messages[0]['content'])
+            return self.create_mock_completion(
+                '{"response": "yes", "reason": "R", "confidence_score": 0.9}'
+            )
+
+        mock_acompletion.side_effect = side_effect
+        asyncio.run(self.magi.run_structured(TROLLEY_PROBLEM, method="VoteYesNo"))
+        for p in captured_system_prompts:
+            self.assertNotIn("Respond in", p)
+
+    # ------------------------------------------------------------------
     # Compose — peer-rating attribution robustness
     # ------------------------------------------------------------------
     def _compose_attribution_side_effect(self, key_transform):

@@ -470,6 +470,35 @@ class TestMainOutput(unittest.TestCase):
         stdout, _, _ = _run_main(["q"])
         self.assertNotIn("Deliberative", stdout)
 
+    def test_language_flag_threaded_to_run(self):
+        with patch("sys.argv", ["magi", "q", "--language", "German"]), \
+             patch("magi_core.cli._load_config", return_value={"llms": ["m"], "defaults": {}}), \
+             patch("magi_core.cli._load_prompts", return_value={}), \
+             patch("magi_core.cli.Magi") as MockMagi:
+            mock_instance = MagicMock()
+            mock_instance.run = AsyncMock(return_value="text")
+            MockMagi.return_value = mock_instance
+            with redirect_stdout(io.StringIO()):
+                main()
+        kwargs = mock_instance.run.call_args.kwargs
+        self.assertEqual(kwargs.get("language"), "German")
+
+    def test_language_from_config_default(self):
+        cfg = {"llms": ["m"], "defaults": {"language": "German"}}
+        with patch("sys.argv", ["magi", "q"]), \
+             patch("magi_core.cli._load_config", return_value=cfg), \
+             patch("magi_core.cli._load_prompts", return_value={}), \
+             patch("magi_core.cli.Magi") as MockMagi:
+            mock_instance = MagicMock()
+            mock_instance.run = AsyncMock(return_value="text")
+            MockMagi.return_value = mock_instance
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                main()
+        kwargs = mock_instance.run.call_args.kwargs
+        self.assertEqual(kwargs.get("language"), "German")
+        self.assertIn("Language: German", buf.getvalue())
+
 
 # ---------------------------------------------------------------------------
 # main() — argument pass-through to Magi.run()

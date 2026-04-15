@@ -494,6 +494,17 @@ class Magi:
     # Structured result builder
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _language_directive(language: Optional[str]) -> Optional[str]:
+        """Return a brief system-prompt directive mandating the response language.
+
+        Returns None when no language is given. Free text is accepted verbatim,
+        so callers can specify variants like "British English" or "German".
+        """
+        if not language or not str(language).strip():
+            return None
+        return f"Respond in {str(language).strip()}."
+
     async def _build_round_data(
         self,
         round_num: int,
@@ -502,6 +513,7 @@ class Magi:
         method_options: Dict[str, Any],
         valid_results: List[Dict[str, Any]],
         error_results: List[Dict[str, Any]],
+        language: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Build structured data for one deliberation round, including the rapporteur call.
@@ -540,6 +552,12 @@ class Magi:
         rapporteur_model: Optional[str] = None
         rapporteur_summary: Optional[str] = None
 
+        lang_directive = self._language_directive(language)
+        rap_system_prompt = (
+            f"{lang_directive} You are a helpful assistant." if lang_directive
+            else "You are a helpful assistant."
+        )
+
         if method in ("VoteYesNo", "VoteOptions"):
             votes: Dict[str, int] = {}
             for r in valid_results:
@@ -569,7 +587,7 @@ class Magi:
             rap_prompt = self._build_rapporteur_prompt(method, user_prompt, anonymized_text, result_summary)
             if method_options.get("rapporteur_prompt"):
                 rap_prompt += f"\n\n{method_options['rapporteur_prompt']}"
-            rapporteur_summary = await self.invoke_raw_llm(rapporteur_model, "You are a helpful assistant.", rap_prompt)
+            rapporteur_summary = await self.invoke_raw_llm(rapporteur_model, rap_system_prompt, rap_prompt)
 
         elif method == "Probability":
             filtered = [r for r in valid_results if r["confidence_score"] != -1.0]
@@ -607,7 +625,7 @@ class Magi:
             rap_prompt = self._build_rapporteur_prompt(method, user_prompt, filtered_text, result_summary)
             if method_options.get("rapporteur_prompt"):
                 rap_prompt += f"\n\n{method_options['rapporteur_prompt']}"
-            rapporteur_summary = await self.invoke_raw_llm(rapporteur_model, "You are a helpful assistant.", rap_prompt)
+            rapporteur_summary = await self.invoke_raw_llm(rapporteur_model, rap_system_prompt, rap_prompt)
 
         elif method == "Compose":
             candidate_map = {mapping[r["model"]]: r["model"] for r in valid_results}
@@ -713,7 +731,7 @@ class Magi:
             rap_prompt = self._build_rapporteur_prompt(method, user_prompt, anonymized_text)
             if method_options.get("rapporteur_prompt"):
                 rap_prompt += f"\n\n{method_options['rapporteur_prompt']}"
-            rapporteur_summary = await self.invoke_raw_llm(rapporteur_model, "You are a helpful assistant.", rap_prompt)
+            rapporteur_summary = await self.invoke_raw_llm(rapporteur_model, rap_system_prompt, rap_prompt)
 
         # De-anonymise rapporteur summary (replace pseudonyms with real model names)
         if rapporteur_summary:
@@ -866,6 +884,7 @@ class Magi:
         method_options: Optional[Dict[str, Any]],
         deliberative: bool,
         api_keys: Optional[Dict[str, str]] = None,
+        language: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Core deliberation engine. Returns a structured, JSON-serialisable result dict.
@@ -894,6 +913,9 @@ class Magi:
         min_models = self.config.get("defaults", {}).get("min_models", 1)
         sys_base = self.prompts["system_base"]
         sys_full = f"{system_prompt}\n\n{sys_base}" if system_prompt else sys_base
+        lang_directive = self._language_directive(language)
+        if lang_directive:
+            sys_full = f"{lang_directive}\n\n{sys_full}"
 
         try:
             base_prompt = self._prepare_base_prompt(method, user_prompt, method_options)
@@ -914,7 +936,7 @@ class Magi:
                 ],
             }
 
-        round1 = await self._build_round_data(1, method, user_prompt, method_options, results1, errors1)
+        round1 = await self._build_round_data(1, method, user_prompt, method_options, results1, errors1, language=language)
 
         result: Dict[str, Any] = {
             "schema_version": "1.0",
@@ -960,7 +982,7 @@ class Magi:
             })
             return result
 
-        round2 = await self._build_round_data(2, method, user_prompt, method_options, results2, errors2)
+        round2 = await self._build_round_data(2, method, user_prompt, method_options, results2, errors2, language=language)
         result["rounds"].append(round2)
         return result
 
@@ -977,10 +999,12 @@ class Magi:
         method_options: Dict[str, Any] = None,
         deliberative: bool = False,
         api_keys: Optional[Dict[str, str]] = None,
+        language: Optional[str] = None,
     ) -> str:
         """Run deliberation and return a Markdown-formatted report string."""
         result = await self._deliberate(
-            user_prompt, system_prompt, selected_llms, method, method_options, deliberative, api_keys=api_keys
+            user_prompt, system_prompt, selected_llms, method, method_options, deliberative,
+            api_keys=api_keys, language=language,
         )
         return self._render_markdown(result)
 
@@ -993,8 +1017,10 @@ class Magi:
         method_options: Dict[str, Any] = None,
         deliberative: bool = False,
         api_keys: Optional[Dict[str, str]] = None,
+        language: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Run deliberation and return a structured, JSON-serialisable result dict."""
         return await self._deliberate(
-            user_prompt, system_prompt, selected_llms, method, method_options, deliberative, api_keys=api_keys
+            user_prompt, system_prompt, selected_llms, method, method_options, deliberative,
+            api_keys=api_keys, language=language,
         )
