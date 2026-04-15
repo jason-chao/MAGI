@@ -21,6 +21,38 @@ def _primary(slot: Slot) -> str:
     return slot if isinstance(slot, str) else slot[0]
 
 
+def _reveal_names_in_text(text: str, mapping: Dict[str, str]) -> str:
+    """Replace pseudonyms with their real model names in user-facing text.
+
+    `mapping` maps real_model_name -> pseudonym (e.g. "openai/gpt-5.4-nano"
+    -> "Participant X7K2"). Two passes per (model, pseudonym) pair:
+      1. Absorb any preceding "Participant[s] " prefix (case-insensitive) so
+         "Participant X7K2" / "participants X7K2" render cleanly.
+      2. Replace bare 4-char IDs appearing as standalone alphanumeric runs so
+         leaks like "JSVB's position" or "5PPK and 4TEY" are also rewritten.
+
+    IDs are drawn from a restricted alphabet (see utils._ID_CHARS) that
+    excludes I, L, O, 0, 1, so collisions with common user-written acronyms
+    are rare; residual risk ≈ 1/32^4 per assignment.
+    """
+    if not text or not mapping:
+        return text
+    for real_name, pseudo in mapping.items():
+        parts = pseudo.rsplit(" ", 1)
+        if len(parts) != 2:
+            continue
+        pid = parts[1]
+        prefix_re = re.compile(
+            r"[Pp]articipants?\s+" + re.escape(pid) + r"(?![A-Za-z0-9])"
+        )
+        text = prefix_re.sub(real_name, text)
+        bare_re = re.compile(
+            r"(?<![A-Za-z0-9])" + re.escape(pid) + r"(?![A-Za-z0-9])"
+        )
+        text = bare_re.sub(real_name, text)
+    return text
+
+
 def _match_pseudonym(cand_key: str, pseudonyms: List[str]) -> Optional[str]:
     """Resolve a reviewer-returned JSON key to one of the known pseudonyms.
 
@@ -514,6 +546,7 @@ class Magi:
         valid_results: List[Dict[str, Any]],
         error_results: List[Dict[str, Any]],
         language: Optional[str] = None,
+        show_real_names_in_report: bool = True,
     ) -> Dict[str, Any]:
         """
         Build structured data for one deliberation round, including the rapporteur call.
@@ -708,6 +741,13 @@ class Magi:
             for i, item in enumerate(ranked, 1):
                 item["rank"] = i
 
+            if show_real_names_in_report:
+                for item in ranked:
+                    for pr in item["peer_reviews"]:
+                        pr["justification"] = _reveal_names_in_text(
+                            pr.get("justification", ""), mapping
+                        )
+
             aggregate_compose: Dict[str, Any] = {"ranked_candidates": ranked}
             if unattributed_reviewers:
                 aggregate_compose["unattributed_reviewers"] = unattributed_reviewers
@@ -733,10 +773,11 @@ class Magi:
                 rap_prompt += f"\n\n{method_options['rapporteur_prompt']}"
             rapporteur_summary = await self.invoke_raw_llm(rapporteur_model, rap_system_prompt, rap_prompt)
 
-        # De-anonymise rapporteur summary (replace pseudonyms with real model names)
-        if rapporteur_summary:
-            for model_name, pseudo in mapping.items():
-                rapporteur_summary = rapporteur_summary.replace(pseudo, model_name)
+        # De-anonymise rapporteur summary (replace pseudonyms with real model names).
+        # Gated by show_real_names_in_report; uses regex pipeline that catches
+        # bare 4-char IDs as well as the full "Participant XXXX" form.
+        if rapporteur_summary and show_real_names_in_report:
+            rapporteur_summary = _reveal_names_in_text(rapporteur_summary, mapping)
 
         return {
             "round": round_num,
@@ -885,6 +926,7 @@ class Magi:
         deliberative: bool,
         api_keys: Optional[Dict[str, str]] = None,
         language: Optional[str] = None,
+        show_real_names_in_report: bool = True,
     ) -> Dict[str, Any]:
         """
         Core deliberation engine. Returns a structured, JSON-serialisable result dict.
@@ -936,7 +978,10 @@ class Magi:
                 ],
             }
 
-        round1 = await self._build_round_data(1, method, user_prompt, method_options, results1, errors1, language=language)
+        round1 = await self._build_round_data(
+            1, method, user_prompt, method_options, results1, errors1,
+            language=language, show_real_names_in_report=show_real_names_in_report,
+        )
 
         result: Dict[str, Any] = {
             "schema_version": "1.0",
@@ -982,7 +1027,37 @@ class Magi:
             })
             return result
 
-        round2 = await self._build_round_data(2, method, user_prompt, method_options, results2, errors2, language=language)
+        round2 = await self._build_round_data(
+            2, method, user_prompt, method_options, results2, errors2,
+            language=language, show_real_names_in_report=show_real_names_in_report,
+        )
+
+        # Reveal real names in round-2 free-text fields (response, reason) and
+        # in the round-2 rapporteur summary using round-1 pseudonyms.
+        # Round-2 LLMs saw peers under round-1 pseudonyms, so round-1 IDs leak
+        # into their reason/response and — via the anonymised text built from
+        # those fields — into the rapporteur's summary. This second pass is
+        # output-only; round-2 prompts were sent with pseudonyms intact,
+        # preserving blind deliberation.
+        if show_real_names_in_report:
+            round1_mapping = {
+                r["model"]: r["pseudonym"]
+                for r in round1.get("responses", [])
+                if r.get("pseudonym")
+            }
+            for resp in round2.get("responses", []):
+                resp["response"] = _reveal_names_in_text(
+                    str(resp.get("response", "")), round1_mapping
+                )
+                resp["reason"] = _reveal_names_in_text(
+                    str(resp.get("reason", "")), round1_mapping
+                )
+            rapporteur2 = round2.get("rapporteur") or {}
+            if rapporteur2.get("summary"):
+                rapporteur2["summary"] = _reveal_names_in_text(
+                    rapporteur2["summary"], round1_mapping
+                )
+
         result["rounds"].append(round2)
         return result
 
@@ -1000,11 +1075,13 @@ class Magi:
         deliberative: bool = False,
         api_keys: Optional[Dict[str, str]] = None,
         language: Optional[str] = None,
+        show_real_names_in_report: bool = True,
     ) -> str:
         """Run deliberation and return a Markdown-formatted report string."""
         result = await self._deliberate(
             user_prompt, system_prompt, selected_llms, method, method_options, deliberative,
             api_keys=api_keys, language=language,
+            show_real_names_in_report=show_real_names_in_report,
         )
         return self._render_markdown(result)
 
@@ -1018,9 +1095,11 @@ class Magi:
         deliberative: bool = False,
         api_keys: Optional[Dict[str, str]] = None,
         language: Optional[str] = None,
+        show_real_names_in_report: bool = True,
     ) -> Dict[str, Any]:
         """Run deliberation and return a structured, JSON-serialisable result dict."""
         return await self._deliberate(
             user_prompt, system_prompt, selected_llms, method, method_options, deliberative,
             api_keys=api_keys, language=language,
+            show_real_names_in_report=show_real_names_in_report,
         )

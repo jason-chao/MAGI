@@ -331,6 +331,216 @@ class TestMagi(unittest.TestCase):
         self.assertIn("Average Score: 8.00", result)
 
     # ------------------------------------------------------------------
+    # Report-identity reveal (show_real_names_in_report)
+    # ------------------------------------------------------------------
+    @patch('magi_core.core.litellm.acompletion')
+    def test_deliberative_reveals_model_names_in_round2_responses(self, mock_acompletion):
+        """Round-2 responses have round-1 pseudonyms rewritten to real model names."""
+        captured_pseudonyms = {}
+
+        async def side_effect(*args, **kwargs):
+            content = kwargs.get('messages', [{}])[-1].get('content', '')
+            model = kwargs.get('model')
+            if 'Deliberative' in content:
+                import re
+                peer_ids = re.findall(r'Participant ([A-Z0-9]{4})', content)
+                if peer_ids:
+                    captured_pseudonyms.setdefault(model, peer_ids[0])
+                    quoted = captured_pseudonyms[model]
+                    return self.create_mock_completion(
+                        f'{{"response": "yes", "reason": "I agree with Participant {quoted}.", "confidence_score": 0.9}}'
+                    )
+            return self.create_mock_completion(
+                '{"response": "yes", "reason": "R", "confidence_score": 0.9}'
+            )
+
+        mock_acompletion.side_effect = side_effect
+        result = asyncio.run(self.magi.run_structured(
+            TROLLEY_PROBLEM, method="VoteYesNo", deliberative=True,
+        ))
+        r2 = result["rounds"][1]
+        for resp in r2["responses"]:
+            self.assertNotIn("Participant ", resp["reason"])
+            self.assertIn("model", resp)
+
+    @patch('magi_core.core.litellm.acompletion')
+    def test_reveal_handles_bare_id_and_comma_list(self, mock_acompletion):
+        """Bare 4-char IDs (no 'Participant' prefix) in rapporteur summary are revealed."""
+        import re
+
+        async def side_effect(*args, **kwargs):
+            content = kwargs.get('messages', [{}])[-1].get('content', '')
+            if 'Majority' in content:
+                return self.create_mock_completion(
+                    '{"response": "Oppose", "reason": "R", "confidence_score": 0.9}'
+                )
+            # Rapporteur — echo back pseudonyms in varied forms
+            pseudos = re.findall(r'Participant ([A-Z0-9]{4})', content)
+            if len(pseudos) >= 2:
+                p1, p2 = pseudos[0], pseudos[1]
+                return self.create_mock_completion(
+                    f"{p1}'s view and participants {p2} and {p1} all agreed."
+                )
+            return self.create_mock_completion("Summary")
+
+        mock_acompletion.side_effect = side_effect
+        result = asyncio.run(self.magi.run_structured(
+            CAPITAL_PUNISHMENT, method="Majority",
+        ))
+        summary = result["rounds"][0]["rapporteur"]["summary"]
+        known_ids = [r["pseudonym"].split()[-1] for r in result["rounds"][0]["responses"]]
+        for pid in known_ids:
+            pattern = r'(?<![A-Za-z0-9])' + pid + r'(?![A-Za-z0-9])'
+            self.assertIsNone(re.search(pattern, summary),
+                              f"bare ID {pid} leaked in summary: {summary!r}")
+        self.assertNotIn("Participant ", summary)
+
+    @patch('magi_core.core.litellm.acompletion')
+    def test_no_reveal_preserves_pseudonyms_in_round2(self, mock_acompletion):
+        """With show_real_names_in_report=False, round-2 pseudonyms stay."""
+        async def side_effect(*args, **kwargs):
+            content = kwargs.get('messages', [{}])[-1].get('content', '')
+            if 'Deliberative' in content:
+                import re
+                peer_ids = re.findall(r'Participant ([A-Z0-9]{4})', content)
+                if peer_ids:
+                    return self.create_mock_completion(
+                        f'{{"response": "yes", "reason": "I agree with Participant {peer_ids[0]}.", "confidence_score": 0.9}}'
+                    )
+            return self.create_mock_completion(
+                '{"response": "yes", "reason": "R", "confidence_score": 0.9}'
+            )
+
+        mock_acompletion.side_effect = side_effect
+        result = asyncio.run(self.magi.run_structured(
+            TROLLEY_PROBLEM, method="VoteYesNo", deliberative=True,
+            show_real_names_in_report=False,
+        ))
+        r2 = result["rounds"][1]
+        any_pseudo = any("Participant " in r["reason"] for r in r2["responses"])
+        self.assertTrue(any_pseudo, "expected pseudonyms to survive when reveal is off")
+
+    @patch('magi_core.core.litellm.acompletion')
+    def test_reveal_flag_gates_rapporteur_summary(self, mock_acompletion):
+        """With show_real_names_in_report=False, rapporteur summary keeps pseudonyms."""
+        import re
+
+        async def side_effect(*args, **kwargs):
+            content = kwargs.get('messages', [{}])[-1].get('content', '')
+            if 'Majority' in content:
+                return self.create_mock_completion(
+                    '{"response": "Oppose", "reason": "R", "confidence_score": 0.9}'
+                )
+            pseudos = re.findall(r'Participant ([A-Z0-9]{4})', content)
+            if pseudos:
+                return self.create_mock_completion(f"Participant {pseudos[0]} led the view.")
+            return self.create_mock_completion("Summary")
+
+        mock_acompletion.side_effect = side_effect
+        result = asyncio.run(self.magi.run_structured(
+            CAPITAL_PUNISHMENT, method="Majority",
+            show_real_names_in_report=False,
+        ))
+        summary = result["rounds"][0]["rapporteur"]["summary"]
+        self.assertIn("Participant ", summary)
+
+    @patch('magi_core.core.litellm.acompletion')
+    def test_round2_prompt_still_uses_pseudonyms_when_revealing(self, mock_acompletion):
+        """Invariant guard: blind deliberation unaffected by the reveal feature."""
+        captured_user_prompts = []
+
+        async def side_effect(*args, **kwargs):
+            content = kwargs.get('messages', [{}])[-1].get('content', '')
+            captured_user_prompts.append(content)
+            return self.create_mock_completion(
+                '{"response": "yes", "reason": "R", "confidence_score": 0.9}'
+            )
+
+        mock_acompletion.side_effect = side_effect
+        asyncio.run(self.magi.run_structured(
+            TROLLEY_PROBLEM, method="VoteYesNo", deliberative=True,
+            show_real_names_in_report=True,
+        ))
+        deliberative_prompts = [p for p in captured_user_prompts if 'Deliberative' in p]
+        self.assertTrue(deliberative_prompts)
+        for p in deliberative_prompts:
+            self.assertNotIn("modelA", p)
+            self.assertNotIn("modelB", p)
+            self.assertIn("Participant ", p)
+
+    @patch('magi_core.core.litellm.acompletion')
+    def test_round2_rapporteur_summary_rewrites_round1_pseudonyms(self, mock_acompletion):
+        """Round-2 LLMs may quote round-1 pseudonyms in their reason field,
+        which then appear in the round-2 rapporteur input and summary.
+        Reveal must rewrite both round-2 and round-1 IDs in the summary."""
+        import re
+        round1_pseudos = {}
+
+        async def side_effect(*args, **kwargs):
+            content = kwargs.get('messages', [{}])[-1].get('content', '')
+            if 'Majority' in content and 'Deliberative' not in content:
+                return self.create_mock_completion(
+                    '{"response": "Oppose", "reason": "R", "confidence_score": 0.9}'
+                )
+            if 'Deliberative' in content:
+                peer_ids = re.findall(r'Participant ([A-Z0-9]{4})', content)
+                if peer_ids:
+                    round1_pseudos[kwargs.get('model')] = peer_ids[0]
+                    return self.create_mock_completion(
+                        f'{{"response": "Oppose", "reason": "Agreeing with Participant {peer_ids[0]}.", "confidence_score": 0.9}}'
+                    )
+                return self.create_mock_completion(
+                    '{"response": "Oppose", "reason": "R", "confidence_score": 0.9}'
+                )
+            # Rapporteur — quote any round-1 ID we saw
+            if round1_pseudos:
+                quoted = list(round1_pseudos.values())[0]
+                return self.create_mock_completion(f"Summary: {quoted} led the oppose camp.")
+            return self.create_mock_completion("Summary")
+
+        mock_acompletion.side_effect = side_effect
+        result = asyncio.run(self.magi.run_structured(
+            CAPITAL_PUNISHMENT, method="Majority", deliberative=True,
+        ))
+        r1_ids = [r["pseudonym"].split()[-1] for r in result["rounds"][0]["responses"]]
+        r2_summary = result["rounds"][1]["rapporteur"]["summary"]
+        for pid in r1_ids:
+            self.assertIsNone(
+                re.search(r'(?<![A-Za-z0-9])' + pid + r'(?![A-Za-z0-9])', r2_summary),
+                f"round-1 bare ID {pid} leaked into round-2 rapporteur summary: {r2_summary!r}",
+            )
+
+    @patch('magi_core.core.litellm.acompletion')
+    def test_compose_peer_review_justification_revealed(self, mock_acompletion):
+        """Compose peer-review justifications have pseudonyms rewritten."""
+        import re
+
+        async def side_effect(*args, **kwargs):
+            content = kwargs.get('messages', [{}])[-1].get('content', '')
+            if 'Compose' in content:
+                return self.create_mock_completion(
+                    '{"response": "draft", "reason": "R", "confidence_score": 1.0}'
+                )
+            if 'Rate' in content:
+                cands = re.findall(r'--- Candidate (Participant [A-Z0-9]+) ---', content)
+                other = next((c for c in cands if True), cands[0])
+                ratings = {
+                    c.strip(): {"score": 8.0, "justification": f"Better than {other}."}
+                    for c in cands
+                }
+                return self.create_mock_completion(json.dumps({
+                    "response": ratings, "reason": "ok", "confidence_score": 1.0,
+                }))
+            return self.create_mock_completion('{}')
+
+        mock_acompletion.side_effect = side_effect
+        result = asyncio.run(self.magi.run_structured("prompt", method="Compose"))
+        ranked = result["rounds"][0]["aggregate"]["ranked_candidates"]
+        for item in ranked:
+            for pr in item["peer_reviews"]:
+                self.assertNotIn("Participant ", pr["justification"])
+
+    # ------------------------------------------------------------------
     # Language directive
     # ------------------------------------------------------------------
     @patch('magi_core.core.litellm.acompletion')

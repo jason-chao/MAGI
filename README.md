@@ -8,7 +8,7 @@ MAGI is a decision-support system inspired by the **MAGI supercomputer from *Neo
 
 ## How It Works
 
-MAGI sends a question to all configured models in parallel. Each model responds in a structured JSON format (answer + reasoning + confidence score). A **Rapporteur** — the most confident model — then synthesises the group's findings into a final report. An optional **Deliberative Round** lets agents read each other's initial responses before finalising their own, mimicking human group deliberation. During deliberation, each model is assigned a random anonymous ID (e.g. `Participant X7K2`) to reduce brand bias in peer review.
+MAGI sends a question to all configured models in parallel. Each model responds in a structured JSON format (answer + reasoning + confidence score). A **Rapporteur** — the most confident model — then synthesises the group's findings into a final report. An optional **Deliberative Round** lets agents read each other's initial responses before finalising their own, mimicking human group deliberation. During deliberation, each model is assigned a random anonymous ID (e.g. `Participant X7K2`) to reduce brand bias in peer review; the final report shown to the user is de-anonymised by default (see [Identity reveal](#identity-reveal)).
 
 ## Decision Modes
 
@@ -216,6 +216,16 @@ By default, the council responds in English. To deliberate in another language o
 magi "What does a just society owe its migrants?" --method Synthesis --language "Japanese"
 ```
 
+### Identity reveal
+
+During deliberation every model is shown its peers under a random pseudonym (`Participant X7K2`) to reduce brand bias. **Blind deliberation is never turned off** — agents only ever see pseudonyms. By default, though, the final report shown to the user is de-anonymised: rapporteur summaries, post-deliberation responses, and Compose peer-review justifications have pseudonyms rewritten to the real model name so the output is readable.
+
+To keep pseudonyms in the report (e.g. for downstream blind analysis), pass `--anonymous-report` on the CLI, set `defaults.show_real_names_in_report: false` in `config.yaml`, or pass `show_real_names_in_report=False` to `magi.run()` / `magi.run_structured()`.
+
+```bash
+magi "What does a just society owe its migrants?" --method Synthesis --deliberative --anonymous-report
+```
+
 ### `magi_core/prompts.yaml`
 
 The bundled prompt templates are used by default and work out of the box. Override them only if you want to customise system prompts or method instructions.
@@ -236,53 +246,53 @@ python magi-cli.py "Your question here" --method VoteYesNo
 
 ### Examples
 
-**1. VoteYesNo — The Self-Driving Car Dilemma**
+**1. Synthesis — Parfit's Repugnant Conclusion**
+```bash
+magi "Derek Parfit's Repugnant Conclusion: a world of a trillion people living lives barely worth living is morally preferable to ten billion living very happy lives. Is this repugnant, unavoidable, or does it reveal a flaw in utilitarian reasoning?" \
+  --method Synthesis
+```
+
+**2. Probability — Moral Luck**
+```bash
+magi "Two drivers drink the same amount and drive home. One kills a pedestrian by chance; the other arrives safely. The lucky driver deserves the same moral blame and legal punishment as the unlucky one." \
+  --method Probability
+```
+
+**3. VoteYesNo — The Self-Driving Car Dilemma**
 ```bash
 magi "A self-driving car's brakes have failed. It will kill five pedestrians unless its AI swerves onto the pavement, killing the single passenger inside. Should the AI be programmed to sacrifice its passenger?" \
   --method VoteYesNo
 ```
 
-**2. VoteOptions — Organ Allocation**
+**4. VoteOptions — Organ Allocation**
 ```bash
 magi "A hospital has one donor heart. Who should receive it?" \
   --method VoteOptions \
   --options "A 10-year-old child with decades ahead,A 45-year-old surgeon who saves hundreds of lives per year,The patient who has waited longest on the list,Whoever has the highest chance of survival post-transplant"
 ```
 
-**3. Majority — Capital Punishment After Mass Atrocity**
+**5. Majority — Capital Punishment After Mass Atrocity**
 ```bash
 magi "Should capital punishment be re-introduced for terrorist attacks that cause mass civilian casualties, even knowing that wrongful convictions are statistically inevitable?" \
   --method Majority
 ```
 
-**4. Consensus — Abortion**
+**6. Consensus — Abortion**
 ```bash
 magi "At what point, if any, does terminating a pregnancy become morally impermissible, and who — if anyone — has the authority to enforce that line?" \
   --method Consensus
 ```
 
-**5. Minority — The Demanding Conclusion of Effective Altruism**
+**7. Minority — The Demanding Conclusion of Effective Altruism**
 ```bash
 magi "Anyone who spends money on luxuries while children die of preventable diseases is morally equivalent to letting a drowning child die. Is this argument sound?" \
   --method Minority
 ```
 
-**6. Probability — Moral Luck**
-```bash
-magi "Two drivers drink the same amount and drive home. One kills a pedestrian by chance; the other arrives safely. The lucky driver deserves the same moral blame and legal punishment as the unlucky one." \
-  --method Probability
-```
-
-**7. Compose — Steel-Manning Open Borders**
+**8. Compose — Steel-Manning Open Borders**
 ```bash
 magi "Write the strongest possible moral argument for the claim that wealthy nations have an absolute obligation to accept unlimited refugees, regardless of cultural, economic, or security consequences." \
   --method Compose
-```
-
-**8. Synthesis — Parfit's Repugnant Conclusion**
-```bash
-magi "Derek Parfit's Repugnant Conclusion: a world of a trillion people living lives barely worth living is morally preferable to ten billion living very happy lives. Is this repugnant, unavoidable, or does it reveal a flaw in utilitarian reasoning?" \
-  --method Synthesis
 ```
 
 **9. Deliberative Round — Capital Punishment**
@@ -310,6 +320,7 @@ magi "Should you pull the lever?" --method VoteYesNo --output-format json | jq '
 | `--rapporteur-prompt` | Additional instructions for the rapporteur |
 | `--system-prompt` | Context prepended to every agent's system prompt |
 | `-L`, `--language` | Language for model responses (free text, e.g. `"Japanese"`). Defaults to English. |
+| `--anonymous-report` | Keep pseudonyms instead of real model names in the final report. Does not affect deliberation (which is always anonymous). |
 | `--output-format` | `text` (default) or `json` |
 | `--config` | Path to a custom `config.yaml` |
 | `--prompts` | Path to a custom `prompts.yaml` |
@@ -383,7 +394,7 @@ print(json.dumps(result, indent=2))
 |--------|-------------------|
 | `VoteYesNo`, `VoteOptions` | `votes` (object), `winner` (string), `threshold` (float) |
 | `Probability` | `average`, `median`, `min`, `max` (all floats), `abstained_count` (int) |
-| `Compose` | `ranked_candidates` (array — see below) |
+| `Compose` | `ranked_candidates` (array — see below); optional `unattributed_reviewers` (array) when one or more reviewers returned ratings whose keys could not be mapped to a candidate |
 | `Majority`, `Consensus`, `Minority`, `Synthesis` | `null` — result is in `rapporteur.summary` |
 
 #### `ranked_candidates` (Compose)
@@ -400,12 +411,15 @@ print(json.dumps(result, indent=2))
       {
         "reviewer_model": "anthropic/claude-haiku-4-5-20251001",
         "score": 8.0,
-        "justification": "Well-structured and compelling."
+        "justification": "Well-structured and compelling.",
+        "attribution": "positional"
       }
     ]
   }
 ]
 ```
+
+The `attribution` field is present only when the matcher fell back to positional (candidate-order) attribution because the reviewer's JSON keys could not be resolved to a pseudonym. Regular entries omit the field.
 
 #### Error responses
 
@@ -475,6 +489,8 @@ print(json.dumps(result, indent=2))
 | `defaults.min_models` | `int` | `1` | Minimum responding models before aborting |
 | `defaults.request_timeout` | `float` | `60` | Seconds before an LLM call is abandoned |
 | `defaults.vote_threshold` | `float` | `0.5` | Minimum vote fraction for a winner |
+| `defaults.language` | `str` | — | Language/culture for model responses (free text). CLI `--language` overrides. |
+| `defaults.show_real_names_in_report` | `bool` | `true` | Replace pseudonyms with real model names in the final report. CLI `--anonymous-report` forces `false`. |
 | `litellm_debug_mode` | `bool` | `false` | Enable verbose litellm logging |
 
 Config is validated at construction time — invalid values raise `ValueError` immediately.
@@ -493,6 +509,7 @@ Both methods accept identical parameters:
 | `deliberative` | `bool` | `False` | Enable a second round where agents review peer responses |
 | `api_keys` | `dict[str, str] \| None` | `None` | Per-call API keys keyed by provider (e.g. `{"openai": "sk-...", "anthropic": "sk-ant-..."}`) — overrides env vars |
 | `language` | `str \| None` | `None` | Mandate response language/culture (free text, e.g. `"Japanese"`). `None` = English. |
+| `show_real_names_in_report` | `bool` | `True` | Replace pseudonyms with real model names in the final report (rapporteur summary, post-deliberation responses, Compose peer-review justifications). Deliberation itself is always anonymous regardless of this flag. |
 
 **`method_options` keys:**
 
@@ -564,7 +581,7 @@ config.yaml        Default model selection
 
 **Key design decisions:**
 - All LLM calls are async (`asyncio.gather`) — models are queried in parallel.
-- Agents use random anonymous IDs (`Participant X7K2`) during deliberation to reduce brand bias.
+- Agents use random anonymous IDs (`Participant X7K2`) during deliberation to reduce brand bias; IDs are rewritten to real model names in the final report unless `show_real_names_in_report=False` / `--anonymous-report` is set.
 - The rapporteur is selected by confidence score; ties are broken randomly.
 - `Synthesis` uses the same rapporteur selection as `Majority` but with a prompt that mandates comprehensive inclusion of all perspectives.
 - `run()` and `run_structured()` share a single `_deliberate()` engine; the only difference is whether the result dict is rendered to Markdown or returned as-is.

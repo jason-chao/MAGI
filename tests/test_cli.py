@@ -483,6 +483,21 @@ class TestMainOutput(unittest.TestCase):
         kwargs = mock_instance.run.call_args.kwargs
         self.assertEqual(kwargs.get("language"), "German")
 
+    def test_anonymous_report_flag_threaded(self):
+        with patch("sys.argv", ["magi", "q", "--anonymous-report"]), \
+             patch("magi_core.cli._load_config", return_value={"llms": ["m"], "defaults": {}}), \
+             patch("magi_core.cli._load_prompts", return_value={}), \
+             patch("magi_core.cli.Magi") as MockMagi:
+            mock_instance = MagicMock()
+            mock_instance.run = AsyncMock(return_value="text")
+            MockMagi.return_value = mock_instance
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                main()
+        kwargs = mock_instance.run.call_args.kwargs
+        self.assertEqual(kwargs.get("show_real_names_in_report"), False)
+        self.assertIn("Report : anonymous", buf.getvalue())
+
     def test_language_from_config_default(self):
         cfg = {"llms": ["m"], "defaults": {"language": "German"}}
         with patch("sys.argv", ["magi", "q"]), \

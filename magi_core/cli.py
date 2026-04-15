@@ -107,6 +107,11 @@ Examples:
         default=None,
         help='Language for model responses (free text; e.g. "Japanese"). Defaults to English.',
     )
+    parser.add_argument(
+        "--anonymous-report",
+        action="store_true",
+        help="Keep pseudonyms (instead of real model names) in the final report. Deliberation between models is already anonymous; this flag only affects the report shown to the user.",
+    )
     return parser
 
 
@@ -219,6 +224,10 @@ def main():
 
     language = args.language or config.get("defaults", {}).get("language")
 
+    # Resolution: CLI flag (opt-out) overrides config default.
+    config_show = config.get("defaults", {}).get("show_real_names_in_report", True)
+    show_real_names_in_report = False if args.anonymous_report else bool(config_show)
+
     print(f"Method : {args.method}")
     display_models = [s[0] if isinstance(s, list) else s for s in selected_llms]
     print(f"Models : {', '.join(display_models)}")
@@ -226,6 +235,8 @@ def main():
         print("Mode   : Deliberative")
     if language:
         print(f"Language: {language}")
+    if not show_real_names_in_report:
+        print("Report : anonymous (pseudonyms only)")
     print("-" * 50)
 
     try:
@@ -239,6 +250,7 @@ def main():
                     method_options=method_options,
                     deliberative=args.deliberative,
                     language=language,
+                    show_real_names_in_report=show_real_names_in_report,
                 )
             )
             print(json.dumps(result, indent=2))
@@ -252,6 +264,7 @@ def main():
                     method_options=method_options,
                     deliberative=args.deliberative,
                     language=language,
+                    show_real_names_in_report=show_real_names_in_report,
                 )
             )
             print(result)

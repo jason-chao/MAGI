@@ -77,6 +77,12 @@ defaults:
   # Defaults to English when unset. CLI --language overrides this value.
   # language: Japanese
 
+  # Whether to replace pseudonyms with real model names in the final report
+  # shown to the user. Deliberation between models is always anonymous; this
+  # only affects the output the user sees. Default: true. CLI --anonymous-report
+  # forces this to false.
+  show_real_names_in_report: true
+
 # ---------------------------------------------------------------------------
 # litellm_debug_mode — set to true to print raw LiteLLM API traffic to stderr.
 # Useful for diagnosing auth errors or unexpected model responses.
