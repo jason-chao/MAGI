@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "magi-core"
-version = "0.4.3"
+version = "0.4.4"
 description = "Multi-Agent Group Intelligence: orchestrate a council of LLMs to deliberate on complex questions"
 readme = "README.md"
 license = { file = "LICENSE" }

@@ -241,3 +241,45 @@ async def test_method_execution(magi_client, method, deliberative):
 
     except Exception as e:
         pytest.fail(f"{method} (Deliberative={deliberative}) raised: {e}")
+
+
+@pytest.mark.asyncio
+async def test_synthesis_language_directive_live(magi_client):
+    """Live smoke test for the `language` parameter.
+
+    Runs a single Synthesis call with `language="Japanese"` and asserts the
+    rapporteur summary contains Japanese characters. Japanese is detected via
+    Hiragana / Katakana / CJK Unicode ranges, which cannot appear in ordinary
+    English text — so the heuristic is unambiguous without demanding any
+    specific vocabulary.
+    """
+    scenario = METHOD_SCENARIOS["Synthesis"]
+
+    structured = await magi_client.run_structured(
+        user_prompt=scenario["prompt"],
+        method="Synthesis",
+        method_options=scenario["options"],
+        deliberative=False,
+        language="Japanese",
+    )
+
+    assert "error" not in structured, f"run failed: {structured.get('error')}"
+    rapporteur = (structured["rounds"][0].get("rapporteur") or {})
+    summary = rapporteur.get("summary", "") or ""
+    assert len(summary) > 20, f"summary suspiciously short: {summary!r}"
+
+    save_json_artifact("Synthesis_language_ja", False, structured)
+
+    def _is_japanese_char(ch: str) -> bool:
+        cp = ord(ch)
+        return (
+            0x3040 <= cp <= 0x309F  # Hiragana
+            or 0x30A0 <= cp <= 0x30FF  # Katakana
+            or 0x4E00 <= cp <= 0x9FFF  # CJK Unified Ideographs
+        )
+
+    japanese_chars = sum(1 for ch in summary if _is_japanese_char(ch))
+    assert japanese_chars >= 10, (
+        f"summary contains only {japanese_chars} Japanese chars — directive likely ignored. "
+        f"summary head: {summary[:400]!r}"
+    )

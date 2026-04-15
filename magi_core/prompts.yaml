@@ -89,7 +89,7 @@ rapporteur_template: |
   
   {instruction} {footer}
 
-rapporteur_footer: "Do not mention that you are the rapporteur. Write in British English."
+rapporteur_footer: "Do not mention that you are the rapporteur."
 
 rapporteur:
   VoteYesNo:
